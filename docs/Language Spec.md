@@ -1,53 +1,12 @@
- # ECS Scripting Language
+## Scope
  
-## 0. Scope
- 
-This document specifies the syntax and semantics of an ECS-native scripting language, inspired by SQL, Datalog and Rust. It is not meant to be a general-purpose programming language; all language constructs tie closely tied to the specific ECS architecture.
+This document specifies the syntax and features of **LoomScript**, an ECS-native scripting language designed for the **Loom game engine**, inspired by SQL, Datalog and Rust.
+
+LoomScript's constructs are closely tied to the ECS architecture. It is not meant to be a general-purpose programming language.
  
 ---
  
-## 1. Program Structure
- 
-Code is organized using **files** and **modules**. A module is a collection of files located in the same directory, each beginning with the same module declaration:
- 
-```
-module combat
-```
-
-A file can import code definitions from other modules by using the import keyword directly after the module declaration. Declarations can be marked as optional, in which case the compiler will enforce that all usages are properly guarded. 
-
-```
-import core_math
-import optional cloth_physics
-```
-
-### Top-level statements
- 
-A file's top level is evaluated once at load time. The following statements are valid at the top level:
- 
-1. Symbol definitions via `define`.
-2. Event listeners via `on <event>`.
-3. Load-time resolvable `if`/`else` blocks.
-
-An example of a valid top-level structure: 
-
-```
-module combat
-
-import optional magic_items
-
-define enum DamageType (
-	Slashing,
-	Blunt,
-	Piercing,
-	
-	if magic_items
-	   Magical
-	end
-)
-```
-
-## 2. Basic Syntax
+## Basic Syntax
 
 The language aims to minimize the usage of punctuation marks and instead chooses to use plain English keywords wherever sensible. 
 
@@ -67,6 +26,16 @@ integer y = 0   // explicit declaration
 x = 5           // implicit declaration, type inferred
 x = 6           // reassignment
 ```
+
+### Constants
+
+A `const` declaration binds a name to an expression composed from literals and other constants in scope.
+
+```
+const max_inventory = 30
+
+integer slots[max_inventory]
+```
  
 ### Operators
  
@@ -81,7 +50,7 @@ x = 6           // reassignment
 /* block comment */
 ```
  
-## 3. Control flow
+## Control flow
 
 ### Conditional statements
 
@@ -138,17 +107,25 @@ while <condition>
 end
 ```
 
-### Assertions
+### Error Handling
 
-Use the `assert` keyword to evaluate an expression and halt execution if it fails. Assertions can have an optional error message.
+Use the `fail` keyword to halt script execution. An optional message can be included. 
 
 ```
-assert Health.Current <= Health.Max, "Health is over max allowed value"
+if Health.Current > Health.Max)
+	fail "Health is over max allowed value"
+end
+```
+
+Use the `assert` keyword to evaluate an expression and halt script execution if it fails. The following code is equivalent to the one above:
+
+```
+assert( Health.Current <= Health.Max, "Health is over max allowed value")
 ```
  
 ---
 
-## 4. Primitive Types
+## Primitive Types
 
 The `boolean` type is a boolean. What else do you want.
 ### Numeric Types
@@ -163,7 +140,11 @@ For integer types, storage width and signedness is inferred from its declared ra
 | `integer ammo range(0..999)` | 16-bit | no     |
 
 The language uses fixed-point numbers to allow for fine-grained optimizations, while remaining simple to use for the common case.
-For decimal types, storage width and signedness is inferred from both range and precision. For example:
+For decimal types, storage width and signedness is inferred from both range and precision.
+
+`precision(n)` is declared in **decimal places**, not bits. The Precision column below reports the resulting fractional width.
+
+Storage widths are a guarantee, not an optimizer preference: a declaration that resolves to 16 bits will always be 16 bits, and may be budgeted against — for memory, and for the bandwidth it costs to synchronize. How widths are derived is in the implementation spec.
 
 | Declaration                                          | Width   | Signed | Precision |
 | ---------------------------------------------------- | ------- | ------ | --------- |
@@ -195,12 +176,82 @@ An array is declared with a trailing bracket on the field name:
 integer Slots[30]     // bounded, inline, no allocation
 integer Slots[]       // unbounded, dynamically backed
 ```
- 
+
+### Tuples
+
+//TODO
+
 ### Ranges
 
 `range(a..b)` denotes a bounded range; either end may be omitted to leave that side unbounded (`range(..n)`, `range(n..)`). The same `range(...)`  syntax is reused for loop iteration and for declaring numeric/cardinality bounds elsewhere in the language.
 
-## 5. Data Modeling
+## Program Structure
+ 
+Code is organized using **files** and **modules**. A module is a collection of files located in the same directory, each beginning with the same module declaration:
+ 
+```
+module combat
+```
+
+A file can import code definitions from other modules by using the import keyword directly after the module declaration. Declarations can be marked as optional, in which case the compiler will enforce that all usages are properly guarded. 
+
+```
+import core_math
+import optional cloth_physics
+```
+
+### Load-time conditionals
+
+A load-time conditional is any `if` statement whose condition can be resolved when loading the module. Ternary operators can also be load-time conditionals.
+Module names can be used as constants to check if that module is present at load time. 
+
+```
+const hair_subdivisions = 10 if cloth_physics else 1
+
+if cloth_physics
+  <declarations and statements>
+else
+  <fallback>
+end
+```
+
+Load-time conditionals can appear inside imperative blocks just like normal `if` statements, or they can be used to wrap entire declarations (see next section).
+
+Partial symbol definition (putting fields, arguments, etc under conditionals) is not allowed. Symbol redefinition (defining 2 different things under the same name) is not allowed either, even if the conditionals are mutually exclusive.
+
+All conditional branches are resolved checked before any is stripped, so the compiled code must remain valid under all of them. Stripping itself is an optimization, not a guarantee.
+
+> [!NOTE]
+> Constants that depend on a load-time conditional cannot be used to would determine data layout: array bounds, range constraints, etc.
+
+### Top-level statements
+ 
+A file's top level is evaluated once at load time. The following statements are valid at the top level:
+ 
+1. Symbol definitions via `define`.
+2. Constant bindings via `const`.
+3. Event listeners via `on <event>`.
+4. Load-time conditionals.
+
+An example of a valid top-level structure: 
+
+```
+module combat
+
+import optional magic_items
+
+define enum DamageType (
+	Slashing,
+	Blunt,
+	Piercing
+)
+
+if magic_items
+	define tag Enchanted
+end
+```
+
+## Data Modeling
  
  In this language, data and behavior are modeled directly as ECS primitives. All declarations in this section are introduced with `define` keyword. Many data types declare fields or arguments. These are declared in parentheses and are comma-separated,
  
@@ -311,11 +362,11 @@ define private value HelperStruct(...)
 Defaults differ by category, following ECS principles:
 - Data declarations (`value`, `component`, `tag`, `enum`,`relationship`) default to `public`. 
 - Behavior and state declarations (`proc`, `var`, `query`) default to `private`.  
-- No declarations default to `internal`; it must always be written explicitly.
+- No declarations default to `internal`. 
  
 ---
  
-## 6. Annotations
+## Annotations
  
 A declaration may be followed by one or more annotations to provide additional information about that declaration. An annotation is either a bare keyword or a keyword with parenthesized arguments, space-separated from the declaration and from each other. For example:
  
@@ -327,31 +378,52 @@ Annotations can be used with any declaration that can carry extra information; f
 
 ---
  
-## 7. Procedures
+## Procedures
 
-Procedures are reusable code routines that can be invoked from anywhere: 
+Procedures are reusable code routines that can be invoked from anywhere:
  
 ```
 define proc lerp(a: number, b: number, t: number) returns number
     return a + (b - a) * t
 end
+
+
+// usage
+f = lerp(a, b, 0.5)
 ```
  
-Multiple return values are declared with a comma-separated, optionally named list after `returns`. The returned type is a tuple, whoch can be deconstructed at call site:
+Multiple return values are declared with a comma-separated, optionally named list after `returns`. The returned type is a tuple, which can be deconstructed at call site:
  
 ```
-define proc divmod(a: number, b: number) returns number div number, number mod
+define proc divmod(a: number, b: number) returns number div, number mod
     return a / b, a % b
 end
- 
-q, r = divmod(10, 3)
+
+// usage
+div, mod = divmod(10, 3)
 ```
- 
-There are no lambdas or closures. Procedures are named, free-standing, and referenced by name only.
+
+Parentheses at the call site are for grouping arguments. They may be omitted if:
+- The call passes a single argument
+- It is called as a statement (not nested inside a larger expression)
+
+A paren-less argument extends over a complete expression.
+
+```
+print "Hello world"
+pow2 10 + 5          // equivalent to pow2(10 + 5)
+print pow2(100)      // valid
+print(pow2 100)      // invalid — inner call is nested, needs its own parens
+```
+
+
+> [!TIP]
+> There are no lambdas or closures in <lang_name>. Procedures are named, free-standing, and referenced by name only. 
+
 
 ---
 
-## 8. Entities
+## Entities
  
 `Entity` is a built-in handle type.
  
@@ -386,13 +458,14 @@ delete e
  
 ---
  
-## 9. Queries
+## Queries
  
 A query declares a structural match over entities and, optionally, a body
 that runs once per matching result.
  
 ```
-define query nearby_enemies
+define query attack_nearby_enemies
+for
     (attacker with Weapon, Position, Faction),
     (target with Health, Position, Faction)
 where
@@ -404,14 +477,14 @@ do
     h.Current = h.Current - attacker.Weapon.damage
 end
  
-on tick nearby_enemies
+on tick attack_nearby_enemies
 ```
  
 ### Bindings
  
-Every name introduced in a `with` clause is always bound to an `Entity` —
+Every name introduced in a `for` clause is always bound to an `Entity` —
 there is no separate binding form for a component. Component data is
-accessed from the bound entity using the dot syntax from §4
+accessed from the bound entity using the dot syntax from [Access](#access)
 (`attacker.Weapon`).
  
 A component listed in a `with` clause may carry a presence modifier:
@@ -434,9 +507,10 @@ readability; it does not constrain how the compiler evaluates or orders the
 underlying conditions.
  
 As a rule of thumb: a condition belongs in `with` when it can be resolved
-to a fixed presence/bitmap check — structural component presence, tags,
+to a fixed presence check — structural component presence, tags,
 relationship equality against a mutual relationship's indexed side, or an
-enum comparison against a compile-time-resolvable set of labels (§3). A
+enum comparison against a compile-time-resolvable set of labels
+([Enums](#enums)). A
 condition belongs in `where` when it can only be evaluated per-entity at
 runtime over an unbounded or continuous value (distances, arbitrary
 numeric thresholds, comparisons against a value not known until runtime).
@@ -447,7 +521,7 @@ index:
  
 ```
 for (unit with Faction),
-    (child with Parent = unit)
+    (child with Parent unit)
 do
     child.Faction = unit.Faction
 end
@@ -465,7 +539,7 @@ begins with a keyword:
 delete h
 ```
  
-A query with an empty body has no effect and is compiled out.
+A query with an empty body has no effect and costs nothing at runtime.
  
 ### Reductions
  
@@ -478,9 +552,8 @@ target = for (sub with Faction, Rank)
     max_by sub.Victories
 ```
  
-`count` and structural/relationship-cardinality reductions resolve from
-existing presence bitmaps and relationship counters at no additional scan
-cost. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting
+`count` and structural/relationship-cardinality reductions cost no
+additional scan. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting
 every matching entity and cost the same as an equivalent hand-written
 scan — the language does not disguise this cost as free.
  
@@ -528,7 +601,7 @@ both are valid trigger targets.
  
 ---
  
-## 10. Events
+## Events
  
 Built-in triggers established in this specification:
  
@@ -537,38 +610,5 @@ Built-in triggers established in this specification:
   changes.
 - `load` — fires once, at world/level load.
 `on` is the sole binding statement for triggers, used as shown throughout
-§6 and §7.
- 
----
- 
-## 11. Not Yet Specified
- 
-The following areas are known to be part of the language but have not been
-resolved in this specification:
- 
-- Memory tiers, handle-validity states, and null/absence semantics
-  (carried over from an earlier design layer, not yet reconciled with the
-  constructs above).
-
-- Generics and trait/conformance syntax.
-
-- Storage location for payload data on symmetric or many-to-many
-  relationships, which have no single owning side.
-
-- Declaration syntax for custom, game-level events (e.g. `player_joined`)
-  beyond the built-in `tick` / `changed` / `load` triggers. Binding a
-  parameterized event to a query/proc without the trigger's parameter
-  colliding with a `with`-bound name (e.g. `on dead(unit)` alongside a
-  `with`-bound `unit`) is parked pending this.
-
-- Quantified negation over a relationship or sub-match ("no entity related
-  to this one satisfies X") — identified as a real gap, no syntax chosen.
-
-- Syntax for direct iteration over a bound relationship's targets outside
-  a query (e.g. given a held `Entity`, iterating its `Children`) — sketched
-  as reusing the existing `for ... in` loop form, not finalized.
-
-- Whether `sum`/`count` reductions over a live query can be maintained
-  incrementally (updated on write rather than rescanned on read) — would
-  require exposing the prior value on a `changed` event, which is not yet
-  designed.
+[Top-level statements](#top-level-statements) and
+[Declaring and triggering](#declaring-and-triggering).
