@@ -24,15 +24,14 @@ define component Velocity (
 const speed = 10
 
 on load do
-	create entity with (
+	create entity with
 		Position,
 		Velocity(Vector3.left * speed)
-	)
 end
 
 on tick
 for entity with Position, Velocity do
-	entity.position.value += entity.velocity.value
+	entity.Position.value += entity.Velocity.value
 end
 
 ```

@@ -8,11 +8,31 @@ LoomScript's constructs are closely tied to the ECS architecture. It is not mean
  
 ## Basic Syntax
 
-The language aims to minimize the usage of punctuation marks and instead chooses to use plain English keywords wherever sensible. 
+The language aims to minimize the usage of punctuation marks and instead chooses to use plain English keywords wherever sensible. Blocks are opened with a keyword and closed with `end`. Indentation is not significant; it's for readability only.
 
-Blocks are opened with a keyword and closed with `end`.
+Parentheses are used to group elements. Wherever a construct reads unambiguously without them, they may be dropped, and the parentheses-less form is considered idiomatic. The conditions for dropping are stated case-by-case.
+
+Comments are single line and start with a pipe character `|`. Comments have no closing character, and run to the end of the line.
+
+```
+| this is a comment
+```
+
+### Statements and Expressions
+
 Statements are newline-terminated with no semicolons.
-Indentation is not significant; it's for readability only.
+Pure expressions must be part of a statement. A bare expression that discards its result is an error.
+
+### Naming
+ 
+Type names are written in `PascalCase`; everything else in `snake_case`. Names must be unique within their scope. 2 types in the same module cannot share the same name.
+ 
+Component access on an entity keeps the type's casing, because it names a type rather than a field:
+ 
+```
+e.Health.current      | one component lookup, one field offset
+e.Position.value.x    | one component lookup, two field offsets
+```
 
 ### Declaration and assignment
  
@@ -22,9 +42,9 @@ subsequent use in that scope reassigns it. A name's type cannot change after
 its first declaration.
  
 ```
-integer y = 0   // explicit declaration
-x = 5           // implicit declaration, type inferred
-x = 6           // reassignment
+integer y = 0    | explicit declaration
+x = 5            | implicit declaration, type inferred
+x = 6            | reassignment
 ```
 
 ### Constants
@@ -36,20 +56,22 @@ const max_inventory = 30
 
 integer slots[max_inventory]
 ```
- 
+
 ### Operators
  
-- Arithmetic:  `+ - * / %`
+- Arithmetic:  `+ - * / %` 
 - Comparison:  `== != < <= > >=`
-- Boolean: `and or not
+- Boolean: `and or not`
 
-### Comments
- 
+Arithmetic operators can be compounded with assignment:
+
 ```
-// line comment
-/* block comment */
+x += y
+n *= t
 ```
- 
+
+There are no increment/decrement operators (`++ --`).
+
 ## Control flow
 
 ### Conditional statements
@@ -79,15 +101,15 @@ match health
 	when <= 0 
        print "dead"
     when <= 5
-        print "healthy"
-    else
         print "wounded"
+    else
+        print "healthy"
 end
 ```
 
 ### Loops
 
-The `for` loop iterates over sequence of elements, like a numerical range or collection. 
+The `for` loop iterates over a sequence of elements, like a numerical range or collection. 
  
 ``` 
 for i in range(0..n)
@@ -112,7 +134,7 @@ end
 Use the `fail` keyword to halt script execution. An optional message can be included. 
 
 ```
-if Health.Current > Health.Max)
+if health.current > health.max
 	fail "Health is over max allowed value"
 end
 ```
@@ -120,7 +142,7 @@ end
 Use the `assert` keyword to evaluate an expression and halt script execution if it fails. The following code is equivalent to the one above:
 
 ```
-assert( Health.Current <= Health.Max, "Health is over max allowed value")
+assert(health.current <= health.max, "Health is over max allowed value")
 ```
  
 ---
@@ -128,6 +150,7 @@ assert( Health.Current <= Health.Max, "Health is over max allowed value")
 ## Primitive Types
 
 The `boolean` type is a boolean. What else do you want.
+
 ### Numeric Types
 
 Numeric types are designed to allow for gradual refinement based on usage and performance needs. This means there are only 2 numeric types: `integer` and `decimal`.  Instead of manually encoding characteristics like width, signedness and precision into separate types, they are automatically determined based on constraints.
@@ -151,21 +174,24 @@ Storage widths are a guarantee, not an optimizer preference: a declaration that 
 | `decimal score`                                      | 32-bit  | yes    | 13 bits   |
 | `decimal health range(0..1000)`                      | 24-bit  | no     | 13 bits   |
 | `decimal position range(-10000..10000) precision(5)` | 32-bit  | yes    | 17 bits   |
-| `decimal rotation range(0..360) precision(2)`        | 16-bits | no     | 7 bits    |
+| `decimal rotation range(0..360) precision(2)`        | 16-bit  | no     | 7 bits    |
+
 ### Strings
 
 Strings can be either fixed or variable in length. Fixed-length strings are inlined and can be used inside of components.
 
 ```
-string name = "Loom"   // Variable-length string
-string tag length(16)  // Fixed-length string
+string name = "Loom"   | Variable-length string
+string tag length(16)  | Fixed-length string
 ```
+
+Inside a `define`d type, a `string` must state its storage: either a `length(n)`, or `dynamic`. See [Storage](#storage).
 
 Strings can be interpolated by inserting arguments using `$`. Add parenthesis for more complex expressions:
  
 ```
-"Score: $score"                          // bare, simple identifier 
-"Damage: $(max(weapon.damage, 999))"     // parenthesized, arbitrary expression
+"Score: $score"                         | bare, simple identifier 
+"Damage: $(max(weapon.damage, 999))"    | parenthesized, arbitrary expression
 ```
 
 ### Arrays
@@ -173,17 +199,23 @@ Strings can be interpolated by inserting arguments using `$`. Add parenthesis fo
 An array is declared with a trailing bracket on the field name:
  
 ```
-integer Slots[30]     // bounded, inline, no allocation
-integer Slots[]       // unbounded, dynamically backed
+integer slots[30]    | bounded, inline, no allocation
+integer slots[]      | unbounded, dynamically backed
 ```
+
+Inside a `define`d type, an array must state its storage: either a bound, or `dynamic`. See [Storage](#storage).
 
 ### Tuples
 
-//TODO
+ TODO
 
 ### Ranges
 
 `range(a..b)` denotes a bounded range; either end may be omitted to leave that side unbounded (`range(..n)`, `range(n..)`). The same `range(...)`  syntax is reused for loop iteration and for declaring numeric/cardinality bounds elsewhere in the language.
+
+A range constraining a numeric type must include zero. Data is always zero-initialized, so a range that excluded it would declare its own starting value impossible. `range(-10..100)` is fine; `range(1..999)` is not, and costs nothing to widen, since both spellings resolve to the same storage width.
+
+A declared range narrows storage but does not bound it exactly — `range(-10..100)` resolves to a signed byte, which can hold -128. Writing a value outside the declared range fails. Values never wrap; use `%` where wrapping is the intent. Clamping is available but requires explicit syntax, so it is never what happens by accident.
 
 ## Program Structure
  
@@ -198,6 +230,23 @@ A file can import code definitions from other modules by using the import keywor
 ```
 import core_math
 import optional cloth_physics
+```
+
+### Events
+
+Events are the main way by which scripts hook into the running game. There are no specially named procedures that the runtime calls automatically. Instead, the engine exposes a series of built-in events that scripts can listen to. For example:
+
+- `load` — fires once, at world/level load.
+- `tick` — fires every frame.
+
+Use the `on` keyword to listen to events. Both procedures and queries can be hooked up to events. Anonymous blocks can also be declared as listeners.
+
+```
+on load do
+ ...  | initialization
+end
+
+on tick update_velocity
 ```
 
 ### Load-time conditionals
@@ -219,16 +268,16 @@ Load-time conditionals can appear inside imperative blocks just like normal `if`
 
 Partial symbol definition (putting fields, arguments, etc under conditionals) is not allowed. Symbol redefinition (defining 2 different things under the same name) is not allowed either, even if the conditionals are mutually exclusive.
 
-All conditional branches are resolved checked before any is stripped, so the compiled code must remain valid under all of them. Stripping itself is an optimization, not a guarantee.
+All conditional branches are resolved and checked before any is stripped, so the compiled code must remain valid under all of them. Stripping itself is an optimization, not a guarantee.
 
 > [!NOTE]
-> Constants that depend on a load-time conditional cannot be used to would determine data layout: array bounds, range constraints, etc.
+> Constants that depend on a load-time conditional cannot be used to determine data layout: array bounds, range constraints, etc.
 
 ### Top-level statements
  
 A file's top level is evaluated once at load time. The following statements are valid at the top level:
  
-1. Symbol definitions via `define`.
+1. Type definitions via `define`.
 2. Constant bindings via `const`.
 3. Event listeners via `on <event>`.
 4. Load-time conditionals.
@@ -253,11 +302,15 @@ end
 
 ## Data Modeling
  
- In this language, data and behavior are modeled directly as ECS primitives. All declarations in this section are introduced with `define` keyword. Many data types declare fields or arguments. These are declared in parentheses and are comma-separated,
+In this language, data and behavior are modeled directly as ECS primitives. All declarations in this section are introduced with the `define` keyword. 
+
+Many data types declare fields or arguments. These are declared in parentheses and are comma-separated. 
+  
+Fields cannot declare default values, and are always zero-initialized. 
  
 ### Values
  
-A `value` is a plain aggregate type. It is copied on assignment and it's not directly addressable.  
+A `value` is a plain aggregate type. It is copied on assignment and is not directly addressable.  
 
 ```
 define value Vector3 (
@@ -269,7 +322,7 @@ define value Vector3 (
   
 ### Components
  
-A `component` is the unit of data an entity Components are query-able and independently addressable. 
+A `component` is the unit of data an entity. Components are query-able and independently addressable. 
 
 ```
 define component Health (
@@ -280,7 +333,7 @@ define component Health (
  
 ### Tags
  
-A `tag` is a component with no data, only presence.
+A `tag` is a special kind of component with no data, only presence.
 
 ```
 define tag Stunned
@@ -288,25 +341,25 @@ define tag Stunned
  
 ### Enums
  
-An `enum` is a closed set of named labels. Each label may optionally carry a data payload.  Each label has a numeric value, defined explicitly or by declaration order. 
+An `enum` is a closed set of named labels. Each label may optionally carry a data payload. Each label has a numeric value, defined explicitly or by declaration order. 
  
 ```
 define enum Effect (
     Nothing,
     Stun,
-    Heal(integer amount) = 10,    
+    Heal(integer amount) = 10    
 )
 ```
  
-Enums can be pattern-matched using `match` statements:
+Enums can be pattern-matched using `match` statements. The type of the enum does not need to be restated for each clause.
 
 ```
-match action 
+match effect 
 	when Stun
 		apply_stun(target)
 	when Heal(amount) 
 		target.Health.current += amount
-	when Nothing // no-op 
+	when Nothing  | no-op 
 end
 ```
 
@@ -314,7 +367,7 @@ Enums can be added directly to entities, in which case they behave as an exclusi
  
 ### Relationships
  
-A `relationship` links entities. Relationships are special components with first-class syntax. 
+A `relationship` is a special kind of component that links entities together.
 
 By default, relationships are single target and unidirectional; only the source entity is aware of the relationship.
 
@@ -328,7 +381,7 @@ Relationships can also have multiple targets. Max target amount is optional.
 define relationship Targets[8]
 ```
  
-Relationships can be barked as `mutual`.Mutual relationships are bidirectional; both sides are aware of each other. 
+Relationships can be marked as `mutual`. Mutual relationships are bidirectional; both sides are aware of each other. 
 The same name can be used from both sides, or a different name can be specified for each side. Mutual relationships can also have multiple targets.
 
 ```
@@ -343,9 +396,10 @@ define relationship Likes (
 )
 ```
  
-// TODO transitive and ephimeral, exclusive relationships
- 
-### Definition Visibility
+ | TODO transitive and ephemeral, exclusive relationships
+
+
+### Visibility
  
 Every `define` may be accompanied by a visibility keyword:
  
@@ -357,13 +411,43 @@ define private value HelperStruct(...)
 | ---------- | -------------------------------------------------- |
 | `private`  | Visible only within the declaring file             |
 | `internal` | Visible to any file sharing the same `module` name |
-| `public`   | Visible to toher modules, via import               |
+| `public`   | Visible to other modules, via import               |
 
 Defaults differ by category, following ECS principles:
-- Data declarations (`value`, `component`, `tag`, `enum`,`relationship`) default to `public`. 
-- Behavior and state declarations (`proc`, `var`, `query`) default to `private`.  
+- Data declarations (values, components, enums, etc) default to `public`. 
+- Behavior and state declarations (procedures, variables, queries) default to `private`.  
 - No declarations default to `internal`. 
+
+### Storage
  
+Fields inside defined types are inlined by default. Most types have a fixed size so this is not an issue. However, for types that might have a dynamic size, like strings and arrays, the user needs to specify a fixed size or explicitly mark them as `dynamic`. 
+
+`dynamic` opts a field out of inline storage. The field's storage is then managed by the runtime and the type holds a reference to it. This is transparent for the user but must be spelled out because it's more costly than the inline form.
+
+```
+define value Label (
+    string text length(32),    | inline
+    string body dynamic        | separately stored, costlier
+)
+```
+
+ > [!IMPORTANT]
+ > Dynamic data is allowed only at a component top level. A `value` with a `dynamic` field cannot be used inside a component; hoist the field to the component itself.
+ 
+Locals, parameters and query bindings are unaffected — there a bare string or array is considered dynamic, and no annotation is needed.
+
+### Construction
+
+Types are constructed simply by name. There is no `new` operator. Field values can be passed positionally or by name. Named values must always be passed after positional ones.
+
+```
+v = Vector3(0, 0, 0)
+
+w = Weapon(damage: 10, ammo: 100)
+
+l = Label(text, size, alignment: Alignment.Left)
+```
+
 ---
  
 ## Annotations
@@ -371,7 +455,7 @@ Defaults differ by category, following ECS principles:
 A declaration may be followed by one or more annotations to provide additional information about that declaration. An annotation is either a bare keyword or a keyword with parenthesized arguments, space-separated from the declaration and from each other. For example:
  
 ```
-integer counter range(0..) // constraints the range to be non-negative
+integer counter range(0..) | constrains the range to be non-negative
 ```
  
 Annotations can be used with any declaration that can carry extra information; fields, arguments, queries, etc.
@@ -383,72 +467,92 @@ Annotations can be used with any declaration that can carry extra information; f
 Procedures are reusable code routines that can be invoked from anywhere:
  
 ```
-define proc lerp(a: number, b: number, t: number) returns number
+define proc lerp(decimal a, decimal b, decimal t) returns decimal
     return a + (b - a) * t
 end
 
 
-// usage
+| usage
 f = lerp(a, b, 0.5)
 ```
  
 Multiple return values are declared with a comma-separated, optionally named list after `returns`. The returned type is a tuple, which can be deconstructed at call site:
  
 ```
-define proc divmod(a: number, b: number) returns number div, number mod
+define proc divmod(integer a, integer b) returns integer div, integer mod
     return a / b, a % b
 end
 
-// usage
+| usage
 div, mod = divmod(10, 3)
 ```
 
-Parentheses at the call site are for grouping arguments. They may be omitted if:
-- The call passes a single argument
-- It is called as a statement (not nested inside a larger expression)
+Parentheses at the call site are for grouping arguments. They may be omitted if the call passes a single argument and it's called as a statement (not nested inside a larger expression).
 
 A paren-less argument extends over a complete expression.
 
 ```
 print "Hello world"
-pow2 10 + 5          // equivalent to pow2(10 + 5)
-print pow2(100)      // valid
-print(pow2 100)      // invalid — inner call is nested, needs its own parens
+print 10 + 5         | equivalent to print(10 + 5)
+print pow2(100)      | valid
+print(pow2 100)      | invalid — inner call is nested, needs its own parens
 ```
 
+Procedures may share a name as long as the type and/or amount of arguments differ. When disambiguating procedure calls, the one with the least amount of coercion is selected. 
+
+```
+define proc foo(integer a, integer b) ...
+
+define proc foo(integer a, decimal b) ...
+
+foo(2, 3)  | Chooses the first declaration since it better matches the arguments
+```
 
 > [!TIP]
-> There are no lambdas or closures in <lang_name>. Procedures are named, free-standing, and referenced by name only. 
-
+> There are no lambdas or closures in LoomScript. Procedures are named, free-standing, and referenced by name only. 
 
 ---
 
 ## Entities
  
 `Entity` is a built-in handle type.
+
+All entities have a unique numeric ID.
+
+```
+print entity.id
+```
  
 ### Creation
  
 ```
-e = create entity with
-    Health(Current: 100, Max: 100),
-    Position(Vec3(0, 0, 0)),
+e = create Entity with 
+    Health(current: 100, max: 100),
+    Position,
     Parent(other_entity)
 ```
+
+The `with` list may be wrapped in parentheses, but the form above is idiomatic. A component taking no arguments drops its empty parentheses, so `Position` and `Position()` are the same.
  
-Component construction requires named arguments when a component has more
-than one field. A single positional argument is permitted only when a
-component has exactly one field, or when constructing a designated built-in
-value type (e.g. `Vec3(0, 0, 0)`).
- 
-### Access
+### Component Access
+
+Components of an entity can be accessed directly by using the component Type as if it was a field. Because it is not possible to know beforehand if an entity has a certain component, this access can fail.
+
+To check that a component is present before accessing it, use the `has` operator.
  
 ```
-h = e.Health  // halts if e does not have Health
+h = e.Health  | fails if e does not have Health
+
 if e has Health
-    h = e.Health
+    print e.Health
 end
 ```
+
+### Change Tracking
+
+// TODO fill this section
+- `changed(Component)` — fires on the frame a matching component's value
+  changes.
  
 ### Destruction
  
@@ -460,8 +564,7 @@ delete e
  
 ## Queries
  
-A query declares a structural match over entities and, optionally, a body
-that runs once per matching result.
+A query declares a structural match over one or more entities, an optional set of conditions to filter them, and a body that runs once per matching result. Like procs, queries can be named if they want to be manually invoked, or they can remain anonymous and be declared directly as event listeners.
  
 ```
 define query attack_nearby_enemies
@@ -470,145 +573,81 @@ for
     (target with Health, Position, Faction)
 where
     distance(attacker.Position, target.Position) <= attacker.Weapon.range and
-    attacker.Faction != target.Faction and
+    attacker.Faction != target.Faction and 
     not target has Shield
 do
     h = target.Health
-    h.Current = h.Current - attacker.Weapon.damage
+    h.current = h.current - attacker.Weapon.damage
 end
- 
-on tick attack_nearby_enemies
 ```
- 
-### Bindings
- 
-Every name introduced in a `for` clause is always bound to an `Entity` —
-there is no separate binding form for a component. Component data is
-accessed from the bound entity using the dot syntax from [Access](#access)
-(`attacker.Weapon`).
- 
-A component listed in a `with` clause may carry a presence modifier:
- 
-```
-(e with Position, optional Velocity)
-(e with changed Health)
-(e with Position, without Dead)
-```
- 
-`without` excludes matches and binds no data.
- 
+
 ### Clauses
+
+Queries are comprised of the following clauses:
  
-- `with` — structural requirements (which components a binding must have).
-- `where` — value predicates, combined with `and` / `or` / `not`.
-- `do` — an ordinary imperative block, run once per match.
-The split between `with`/`where` is an authoring convention for
-readability; it does not constrain how the compiler evaluates or orders the
-underlying conditions.
+- `for` — structural requirements (which components a binding must have).
+- `where` — value predicates, combined with `and`/ `or` / `not`.
+- `do` — imperative block, run once per match.
+
+As a rule of thumb: a condition belongs in `for` when it involves matching components structurally, or comparing against a bounded set of values.
+
+A condition belongs in `where` when it involves comparing a component's fields against unbounded or continuous values (distances, arbitrary numeric thresholds, etc).
+
+### The `for` clause
+
+The for clause expresses a list of entities to be bound and iterated. Every name introduced in a `for` clause is always bound to an `Entity`.
+
+The simplest `for` clause matches all entities:
+
+```
+for entity  | entity is bound and can be used inside query bodies
+do
+  print entity.id
+end
+```
+
+Components cannot be bound by name. Component data is accessed from the bound entity using the syntax from [Component Access](#component-access).
  
-As a rule of thumb: a condition belongs in `with` when it can be resolved
-to a fixed presence check — structural component presence, tags,
-relationship equality against a mutual relationship's indexed side, or an
-enum comparison against a compile-time-resolvable set of labels
-([Enums](#enums)). A
-condition belongs in `where` when it can only be evaluated per-entity at
-runtime over an unbounded or continuous value (distances, arbitrary
-numeric thresholds, comparisons against a value not known until runtime).
- 
-A bound relationship may be matched structurally by equality, provided the
-relationship is `mutual` and the query binds from the side that holds the
-index:
+Components listed in `for` clause require a presence modifier. A single modifier can apply to multiple, comma separated components.
+
+`with` matches entities that have the specified component.
+`without` matches entities that don't have the specified component.
+`with changed` matches components that have changed in the last tick.
+
+```
+e with Position, Velocity
+
+e with changed Health
+
+e without Dead
+```
+
+Parentheses separate one binding from the next, so a `for` clause matching a single entity may omit them.
+
+Relationships can be matched structurally to check for specific targets. The targets can be an externally supplied entity or an entity bound within the query.
  
 ```
-for (unit with Faction),
-    (child with Parent unit)
+for (unit with Faction), (child with Parent unit)
 do
     child.Faction = unit.Faction
 end
 ```
- 
-Matching in the opposite direction (checking a unidirectional relationship
-against a specific runtime target) has no equivalent index and is a
-per-entity runtime check like any other `where` predicate.
- 
-`do ... end` may be omitted when the body is exactly one statement that
-begins with a keyword:
+
+### The `do` clause
+
+The `do` clause is the last part of the query (also known as the body). It's an imperative block where all bound entities can be used to execute arbitrary logic. It is the only part of the query where data may be modified.
+
+```
+for entity with Position, Velocity
+do
+  entity.Position.value += entity.Velocity.value
+end
+```
+  
+The `do ... end` keywords may be omitted when the body is exactly one statement:
  
 ```
-(h with Health)
+for h with MarkRemove 
 delete h
 ```
- 
-A query with an empty body has no effect and costs nothing at runtime.
- 
-### Reductions
- 
-A `for`/`where` clause followed by a reducer, instead of a `do` block,
-becomes a single-value expression usable anywhere a value is expected:
- 
-```
-target = for (sub with Faction, Rank)
-    where sub.Faction == unit.Faction and sub.Rank == unit.Rank - 1
-    max_by sub.Victories
-```
- 
-`count` and structural/relationship-cardinality reductions cost no
-additional scan. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting
-every matching entity and cost the same as an equivalent hand-written
-scan — the language does not disguise this cost as free.
- 
-There is no general materialized or orderable result-set type. Grouping,
-sorting, and top-N selection are intentionally outside the query language;
-where needed, they are written as ordinary iteration inside a `proc`.
- 
-### Declaring and triggering
- 
-There are four forms:
- 
-**Named, self-driving** — declared once, bound to a trigger separately:
-```
-define query nearby_enemies (...) where ... do ... end
-on tick nearby_enemies
-```
- 
-**Named, manual** — declared but never bound to a trigger; invoked directly
-by name from inside a procedure or another query's body.
-```
-define query nearby_enemies (...) where ... do ... end
-```
- 
-**Anonymous, self-driving** — declared and bound in a single statement; not
-addressable, always file-private:
-```
-on tick
-for (attacker with Weapon, Position, Faction), (target with Health, Position, Faction)
-where ...
-do
-    ...
-end
-```
- 
-**Anonymous procedure trigger** — no structural match at all, just code
-that should run on an event:
-```
-on tick do
-    ...
-end
-```
- 
-`on <event> <name>` accepts either a named query or a named procedure —
-both are valid trigger targets.
- 
----
- 
-## Events
- 
-Built-in triggers established in this specification:
- 
-- `tick` — fires every frame.
-- `changed(Component)` — fires on the frame a matching component's value
-  changes.
-- `load` — fires once, at world/level load.
-`on` is the sole binding statement for triggers, used as shown throughout
-[Top-level statements](#top-level-statements) and
-[Declaring and triggering](#declaring-and-triggering).
+A query with an empty body has no effect and does not run.

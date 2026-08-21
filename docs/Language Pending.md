@@ -27,23 +27,63 @@ Until this is settled, "chunk" (interchangeably "table") is used throughout to m
 
 This is the root blocker for the rest of this section, for `changed` on a non-owning peer, and for handle-validity semantics. It is an engine decision, and there is currently no engine design document — only [Design Principles](Design%20Principles.md).
 
-**Component field legality is unstated** · `discrepancy` · `5`
+**Component field legality — decided, not yet written into the spec** · `discrepancy` · `3`
 
-The engine synchronizes state as per-frame chunk copies, so a component's fields must be flat-copyable. `integer Slots[]` (unbounded, dynamically backed) and variable-length `string` are not, yet nothing in [Primitive Types](Language%20Spec.md#primitive-types) forbids them inside a component — and the unsafe form is one character shorter than the safe one (`Slots[]` vs `Slots[30]`), making it the easier thing to write. [Strings](Language%20Spec.md#strings) notes fixed-length strings are component-usable, implying the variable form is not, but never states the rule directly.
+The engine synchronizes state as per-frame chunk copies, so a component's fields must be flat-copyable. Nothing in [Primitive Types](Language%20Spec.md#primitive-types) says so, and the unsafe form is currently the shorter one (`Slots[]` vs `Slots[30]`, `string name` vs `string tag length(16)`), making it the easier thing to write.
 
-Resolution direction: first-class constructs for the cases that genuinely need pointer-like data (e.g. chunk-managed buffers). Not yet designed. The legality rule should be stated explicitly regardless.
+Rule settled in design, still absent from the spec:
 
-Mechanism sketched: eligibility is decided by taint propagation — an unbounded array taints the `value` containing it, and the taint propagates outward to disqualify any component holding it. This reuses the previous iteration's struct-tier inference wholesale, including the trick of storing the offending field path alongside the taint at declaration time, so reporting a failure does not require re-walking the type. [Load-time constant taint](Language%20Implementation.md#load-time-constant-taint) is the same mechanism and should share an implementation.
+- Inside a `define value` or `define component`, storage class must be stated. A bare `string` or `[]` is a compile error there.
+- A stated bound means inline and free: `string name length(16)`, `integer Slots[30]`.
+- `dynamic` is permitted but costlier — the field holds a chunk-relative offset into ECS-managed memory rather than a pointer, so the chunk still blind-copies as a unit. Explicit because it is expensive, per [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs).
+- Locals, proc params and query bindings keep the relaxed form: bare means dynamic, no annotation. The requirement attaches to declared data types, not to code, because a `value`'s layout cannot depend on where it is used.
+- Dynamic data is allowed only at a component's top level. A `value` containing a `dynamic` field is therefore illegal inside a component. See [Nested dynamic data in components](#nested-dynamic-data-in-components) for the option this forecloses.
 
-Re-evaluating array/cardinality syntax (Jose) belongs here: the syntax is what makes the unsafe form the easy one.
+Eligibility is decided by taint propagation — a dynamic field taints the `value` containing it, and the taint propagates outward to disqualify any component holding it. This reuses the previous iteration's struct-tier inference wholesale, including the trick of storing the offending field path alongside the taint at declaration time, so reporting a failure does not require re-walking the type. [Load-time constant taint](Language%20Implementation.md#load-time-constant-taint) is the same mechanism and should share an implementation.
+
+Still open: whether a `dynamic` component field is directly addressable or handle-like — holding a reference to one across a frame boundary is the case that would bite.
+
+**Nested dynamic data in components** · `idea` · `2`
+
+Option deliberately not taken, recorded because it is a strict superset of the rule above — nothing written under the current rule becomes illegal if this is adopted later.
+
+The idea: exploit components having a fixed layout, so nested fields resolve to static offsets, and design a single pointer representation that discriminates ECS-managed memory from general memory while occupying the same space. Dynamic data could then nest at any depth rather than only at a component's top level.
+
+Two things make it hard:
+
+- **The discriminant cannot be dynamic.** A chunk-relative offset survives being blind-copied to a peer; a general-memory pointer does not. If the mode were decided at run time, validity of a copy would depend on runtime state, leaving only a per-pointer check at sync time (a recurring per-frame cost) or silent corruption in networked builds. So the mode must be static — decided by where the field lives.
+- **That reintroduces two layouts per `value`**, now identical in size but different in meaning. Copying a stack-side value into a component field stops being a copy and becomes a deep copy plus pointer fixup, at a cost proportional to the value's dynamic content. Coherent only if promotion into a component is an explicit named operation, never a silent assignment — which is where the previous iteration independently landed ([Previous Iteration.md:34](Previous%20Iteration.md)).
+
+Blocked on the storage model regardless: "chunk-relative" presumes archetype storage. Under inverted-bitmap storage entities never move and the per-component arrays are the storage, so there may be no chunk to be relative to in the same sense.
+
+**Flattened component layout** · `mechanism` · `3`
+
+Components have a fixed layout, so nested `value` fields resolve to static offsets rather than requiring navigation. Worth stating as its own mechanism because several open items lean on it:
+
+- Static access-set extraction gets nested-field granularity for free — `Nameplate.title.text` is an offset and a width, not a load-and-chase.
+- `where` predicates can address nested fields at the same cost as top-level ones.
+- It settles that `value` nesting costs nothing at run time, which is what makes values a free abstraction rather than a structural choice.
+- The taint mechanism already carries a field path; flattening turns that path into the offset.
 
 **Memory tiers, handle validity, and null/absence semantics** · `pending` · `4`
 
 Carried over from an earlier design layer, not yet reconciled with the current constructs.
 
+The previous iteration's answer to absence is the handle state enum described under [Asynchronous operations](#asynchronous-operations) — `Pending` / `Ready` / `Failed` / `Dead`, with `.is_valid()` true only for `Ready`. There is no null and no separate `Result` type; absence, failure and pending completion are the same three-valued question asked of a handle.
+
 Frame-tier memory — bump-allocated, discarded at frame end — is the one tier with worked-out reasoning; it is what would make [GroupBy](#queries-and-predicates) technically safe.
 
 Null coalescing operator (Jose) depends on absence semantics being settled first.
+
+**Asynchronous operations** · `pending` · `4`
+
+Nothing in the current spec addresses operations that do not complete within the frame they were requested — resource and asset loading being the obvious case. Direction from [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#handles--validity): the request returns a handle immediately, and the handle's state enum (`Pending` / `Ready` / `Failed` / `Dead`) is the completion signal. No futures, no callbacks, no suspension — the author polls or matches on state.
+
+No new machinery is required: handle state is an ordinary [enum](Language%20Spec.md#enums), and `match` already binds label payloads, so the polling form falls out of constructs the spec has.
+
+What remains a decision is that handle state carries three jobs at once — absence, fallibility, and async completion. It also means the language has no `Result` type and never needs one, which is a position the current spec has not taken.
+
+Depends on the host embedding API, which is unwritten — see [Runtime & Deployment](Runtime%20&%20Deployment.md#not-yet-written).
 
 **Ownership and `non_serialized` have layout consequences** · `pending` · `4`
 
@@ -63,6 +103,10 @@ System scheduling and dependency declaration are unspecified. Related and unreso
 
 Note the doc is currently inconsistent on this: [ECS focused](Design%20Principles.md#ecs-focused) lists systems among the primitives the design is organized around, while the language has no system construct at all.
 
+Direction settled: a system is an organization and scheduling construct, not a behaviour container. Two pieces of the previous iteration's design ([Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#queries--systems)) are superseded and should not be carried over — `run_query`, made redundant by named queries already being invocable like procedures, and the overridable `tick()` method, replaced by an `on tick` binding. What survives is the shape: a zero-argument block the engine instantiates and script never constructs.
+
+Still to design: how dependencies are declared, whether ordering within a system is positional or explicit, and whether a system is the thing dependencies attach to or merely a namespace.
+
 **Static access-set extraction** · `pending` · `5`
 
 The previous design required explicit per-query read/write declarations, on the grounds that "conflict detection requires declared, not inferred, access sets". The current position is the opposite and is settled: no author-declared access, with the compiler statically extracting per-field read/write sets from imperative bodies.
@@ -79,19 +123,92 @@ The intended model is that the engine builds a DAG from declared dependencies pl
 
 ## Data Modeling and Declaration Syntax
 
-**Field declaration syntax** · `pending` · `4`
+**Declaration syntax pass** · `pending` · `4`
 
-Unspecified. Reordering declarations so the name is sandwiched between type and annotations (Jose), and optional fields with the associated bit-packing idea (Jose), are both proposals against this.
+Direction settled: declaration becomes explicit, so a bare `=` is always reassignment and a misspelled name is an error rather than a silent new binding. This closes the pit-of-failure in [Declaration and assignment](Language%20Spec.md#declaration-and-assignment), which currently fixes a name's type at first use and treats every later use as reassignment.
 
-**`=` for both declaration and reassignment is a pit-of-failure case** · `discrepancy` · `4`
+Exact form deferred to a dedicated pass. Open within it:
 
-[Declaration and assignment](Language%20Spec.md#declaration-and-assignment) fixes a name's type at first use in a scope; every later use reassigns. A misspelled name therefore declares a new variable with an inferred type instead of raising an error. To revisit alongside field declaration syntax above.
+- Marker for the inferred case. A leading type is already an unambiguous declaration (`integer y = 0`); only inference lacks one. `x := 5` needs no keyword but is punctuation, against [Readable by non-engineers](Design%20Principles.md#readable-by-non-engineers); `var x = 5` reads better but adds a second declaration form beside the type-first one.
+- Type-first (`integer x`) versus name-first (`x: f32`, previous iteration).
+- Whether file-level mutable state exists and takes a distinct keyword. It is game-tier — it survives frames, and hot reload has to decide what happens to it — so making that visible at the declaration is worth considering.
+- Reordering so the name sits between type and annotations (Jose). Possibly already satisfied: `integer ammo range(0..999)` puts it there.
+- Optional fields and the associated bit-packing idea (Jose).
+
+**Procedure overloading — decided, not yet written into the spec** · `pending` · `3`
+
+- Procs overload on argument types. Parameter names do not participate, so `damage(amount: integer)` and `damage(percent: integer)` are not a valid overload set.
+- Types and procs cannot share a name; overloading lives inside the proc namespace only. Otherwise `Health(current: 100)` is ambiguous between construction and a call.
+- Constrained numerics are one type for resolution. `integer range(0..100)` and `integer` do not form an overload set — constraints refine representation, not identity.
+- `integer` implicitly converts to `decimal`; the non-converted candidate wins. Under [unified numeric representation](Language%20Implementation.md#unified-representation) this generalizes to "prefer the smaller scale change".
+
+Combined with dot-sugar on the first parameter, overloading covers the plain "one name, many types" case, so traits are needed only for generic code.
+
+Open: the syntax doc's rule that a hand-written concrete generic query takes precedence over the autogenerated one is a specialization rule, and needs reconciling with these when generics are designed.
+
+**Casing convention — decided, not yet written into the spec** · `pending` · `3`
+
+PascalCase names types — values, components, tags, relationships, enums. snake_case names everything else — procs, fields, locals, parameters. Casing is convention rather than a compiler rule; what actually prevents collisions is that a proc may not take a type's name.
+
+Component access on an entity keeps the type's own casing, since it names a type rather than a field:
+
+```
+e.Health.current          // one lookup, one offset
+e.Position.value.x        // one lookup, two offsets
+```
+
+Two reasons. It is the same symbol written in `with Health`, `create entity with Health(...)` and `if e has Health`, so lowercasing it only in access position makes one symbol change case by context. And it marks where the cost is: component access is a keyed lookup that can miss and halt, while field access is a static offset under [flattened component layout](#flattened-component-layout).
+
+The invariant that falls out: a well-formed access has exactly one PascalCase segment after the entity handle. Everything before it is a handle, everything after is free offsets. Two capitals in a chain would mean two lookups, and no construct produces that, so it reads as an error rather than a hidden cost.
+
+Written into the spec. Still to fix: `entity.position.value` in [LoomScript Examples](LoomScript%20Examples.md).
+
+**Expression statements — decided, not yet written into the spec** · `pending` · `2`
+
+An expression statement is legal only when its top-level expression is a call, or a keyword whose effects are known (`create`, `delete`). Bare `Health(current: 100)`, `a + b` and `e.Health` are errors — dead code that looks like it does something.
+
+`create` and `delete` are statement forms that optionally bind, not expressions that must. Dropping the handle from a creation is legitimate: the entity exists and queries will find it.
+
+The previous iteration barred unbound construction on ownership grounds — the binding governs lifetime, so construction without a destination is invalid. That argument does not apply here, since values are copied and own no memory. Same rule, different justification, and the new one is why the general form is preferable to a construction-specific one.
+
+**Parens carry three roles — accepted** · `pending` · `1`
+
+Field lists, construction and calls all use `()`. The previous iteration split them (`{}` for construction, `()` for calls) to avoid ambiguity when a type and a proc share a name. Not adopted: `define` marks declarations, and no overloading across the type and proc namespaces means resolution is unambiguous without a second bracket form. Recorded so the divergence from the previous iteration is deliberate.
 
 **Generics and trait/conformance syntax** · `pending` · `3`
+
+Sketched in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#generics--traits), never carried forward. Generics resolve by monomorphization, with `<>` holding any compile-time parameter — type parameters and size parameters alike — and no marker needed, since types are never values and no ambiguity exists to guard against.
+
+Traits declare **fields only**, never procedures. A field is satisfied three ways: a same-named, same-typed field (empty `trait X for Y { }` body); a differently-named field, by alias; or a getter/setter pair. Conformance is always explicit and never structural, including for types the author does not own, primitives included. No access modifiers on trait fields — read/write is the using system's decision, never dictated by the data.
+
+Two things to reconcile when this is taken up:
+
+- Proc-backed trait fields break the assumption that field access is a plain read or write, which [static access-set extraction](#systems-scheduling-and-parallelism) and [flattened component layout](#flattened-component-layout) both rely on.
+- A hand-written concrete generic query taking precedence over the autogenerated one is a specialization rule, and needs squaring with the overload rules above.
+
+**Components as a single type** · `idea` · `3`
+
+From [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#components--lifetime-tiers): no separate handle type ever appears in the type system. The compiler switches a component's backing between stack bytes and entity storage based on what it can prove, and the author sees one type and one operation set throughout. Assignment always copies; behaviour differs by what is copied, never by a hidden type distinction. Query bindings are live-backed by construction.
+
+Worth evaluating against [Domain over technicism](Design%20Principles.md#domain-over-technicism) — it is the same idea applied to handles. The cost is that whether a write lands on entity data or on a local becomes a fact about provenance rather than about the type, which is exactly the kind of thing [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) is suspicious of.
+
+**Procedure restrictions** · `pending` · `2`
+
+[Procedures](Language%20Spec.md#procedures) states there are no lambdas or closures. Three further restrictions from the previous iteration are unstated: procedures cannot be stored in components, cannot be held in persistent state, and cannot be used as callbacks. Also unstated is dot-sugar on the first parameter — `effect.get_magnitude()` for `get_magnitude(effect)` — which the overload rules above assume exists.
 
 **`requires` on components** · `mechanism` · `2`
 
 An alternative to inheritance: a component declares a dependency on another. Cascade-removal reuses the existing end-of-frame flush pass, the same mechanism as relationship deletion — reuse, not new machinery. No syntax, no semantics for conflicts or diamond cases.
+
+**Bit packing** · `idea` · `2`
+
+Three directions to explore, not necessarily together:
+
+- Automatic packing of declared booleans within a type.
+- A dedicated bitfield primitive.
+- Flag enums — power-of-two labels with set operations, against the current rule that a label's value comes from declaration order.
+
+Runs into the alignment rule in [Numeric Representation](Language%20Implementation.md#numeric-representation): numbers are byte-aligned, trading storage efficiency for direct addressability. Packed fields are not directly addressable, so any of these needs a story for how a packed field is read, written and named in an access set. Jose's optional-fields proposal in the declaration syntax pass carries the same idea from a different direction.
 
 **Value constants** · `pending` · `2`
 
@@ -111,11 +228,48 @@ A second cost cliff sits inside `where`. If acceleration depends on the compiler
 
 Spatial partitioning for `distance(...)` is a candidate to evaluate against [No general indexing or materialization](Design%20Principles.md#no-general-indexing-or-materialization), not a violation of it.
 
+** Reductions ** 
+
+Reductions have been pulled from the spec for now, they need further work.
+
+Putting the entire text here for reference: 
+
+### Reductions
+
+ Reductions are special kinds of queries that produce a single value instead of iterating over all results imperatively.
+ A query ending by a reducer instead of a `do` block becomes a value-producing queries usable anywhere a value is expected:
+ 
+```
+define query count_dead_units 
+for unit with Unit, without Alive
+count unit
+
+var dead = count_dead_units()
+```
+ 
+`count` and structural/relationship-cardinality reductions cost no
+additional scan. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting
+every matching entity and cost the same as an equivalent hand-written
+scan — the language does not disguise this cost as free.
+ 
+There is no general materialized or orderable result-set type. Grouping,
+sorting, and top-N selection are intentionally outside the query language;
+where needed, they are written as ordinary iteration inside a `proc`.
+ 
+
 **Incrementally maintained reductions** · `pending` · `2`
 
 Whether `sum`/`count` reductions over a live query can be maintained incrementally (updated on write rather than rescanned on read) — would require exposing the prior value on a `changed` event, which is not yet designed. Mechanism sketched: hook the existing dirty-bitmap/version-per-block change detection and update a running accumulator on write, rather than building new infrastructure.
 
 Deferred rather than solved: access to previous values is a requirement on the ECS design itself, and belongs in the requirement list gathered when that design happens, not here.
+
+**Query amortization and update rates** · `pending` · `3`
+
+Budgeted "process N per tick, resume next tick where it left off" work. Reasoning from [Previous Iteration](Previous%20Iteration.md), never carried forward: true coroutines are disallowed, since suspending mid-iteration holds call-stack state across a frame boundary and violates the tier rules. The replacement is a resumable cursor — position and accumulator stored as game-tier state, each resume starting a fresh call-stack scope.
+
+Staggered update rates (e.g. distant entities every other frame) are treated separately and more simply, as bucketing: partition the query by `entity_id % K` and process one bucket per frame, with no suspension mechanism at all.
+
+No syntax for either. Open whether the cursor is author-visible state or a query-level annotation.
 
 **GroupBy** · `shelved` · `1`
 
@@ -171,6 +325,18 @@ Mechanism side is tracked in [Language Implementation](Language%20Implementation
 
 Unreconciled, and newly reopened. The previous design flagged loop and recursion limits for determinism as needed but undesigned, noting there is no GC pause to blame instead. Transitive relationship traversal is the first construct with genuinely runtime-dependent cost and has no max-depth safeguard, which makes the gap concrete rather than theoretical.
 
+[Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#error-handling) does answer it, and cheaply: a simple runtime execution cap that halts on exceeding it, with no proof-of-termination requirement and no annotations. Worth adopting or rejecting explicitly rather than leaving the gap open.
+
+**Halt unwind granularity** · `pending` · `3`
+
+[Error Handling](Language%20Spec.md#error-handling) says `fail` halts script execution, but not how far the halt travels. The previous iteration specified it precisely: a halt unwinds to the nearest engine-called entry point. A tick function aborts the whole tick; a query callback aborts only that entity's iteration and the rest continue; a cursor resume aborts only that resume.
+
+That granularity is what makes [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient) concrete. It also draws a line the current spec does not: expected absence (a dead handle, an unloaded resource, a missing optional component) is never a halt, and is handled through handle state instead.
+
+The previous iteration kept the boundary unambiguous by forbidding a query from invoking another query. The current spec explicitly permits it — [Declaring and triggering](Language%20Spec.md#declaring-and-triggering) has named queries "invoked directly by name from inside a procedure or another query's body" — so the question the ban avoided is live here. A halt inside a nested query has no defined stopping point: the inner query's current entity, the outer one's, or the whole trigger.
+
+Naming: the previous iteration used `halt` rather than `fail`, on the grounds that it communicates only the current entry point stopping. The current spec uses `fail`.
+
 **Error propagation and catching** · `idea` · `2`
 
 The spec has `fail` and `assert` ([Error Handling](Language%20Spec.md#error-handling)); propagation and recovery are unspecified. Proposed (Jose): proc calls automatically propagate failures upwards, with some keyword to catch them. Must be weighed against [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient).
@@ -193,6 +359,10 @@ Deliberate — evaluating the condition at run time is equally correct, so promi
 
 Resolution direction: tooling rather than spec — surface what was stripped and what survived, per [Show the machinery in motion](Design%20Principles.md#show-the-machinery-in-motion). A guarantee stated in the language would buy the same confidence at the cost of pinning the backend.
 
+**Bundled source produces private types** · `pending` · `1`
+
+From the previous iteration: sharing source between modules by local bundling, without registering a module, yields a distinct private type per bundler — by design, not as a defect. Sharing a real type requires a proper module dependency. Unstated in [Program Structure](Language%20Spec.md#program-structure), and the kind of rule that is discovered the hard way if left implicit.
+
 **Load-time codegen** · `shelved` · `1`
 
 Folding load-time-known values into native code during the Wasm-to-native step at load, rather than emitting indirection for them. Would make any load-time-resolved constant free at run time instead of costing a lookup. Not needed while the only load-time fact is module presence, since a presence check is a branch rather than a value feeding computation. Becomes relevant the moment a load-time value participates in layout.
@@ -213,9 +383,17 @@ Related and dropped outright rather than deferred: **two-tier compilation** (mod
 
 **`LoomScript Examples.md` and the spec disagree** · `contradiction` · `2`
 
-Partly aspirational syntax, partly spec lag; each divergence needs resolving in one direction. Current list:
+Examples now follow the spec. Most of the earlier list turned out to be spec lag rather than aspirational syntax: parentheses are optional wherever a construct reads unambiguously without them, so the examples were already idiomatic and the spec was missing the rule. Component access casing was the one real fix.
+
+Still divergent, because the spec has no position to sync to:
 
 - `Vector3.left` — see [value constants](#data-modeling-and-declaration-syntax).
-- `create entity with (...)` uses parentheses; [Creation](Language%20Spec.md#creation) omits them.
-- `for entity with Position, Velocity do` — no parentheses around the binding, unlike every example in [Queries](Language%20Spec.md#queries).
-- `entity.position.value` — lowercase field access against a `Position` component; casing convention for component access is unstated.
+
+**Range violation: which build halts where** · `pending` · `3`
+
+Settled and written into [Ranges](Language%20Spec.md#ranges): never wrap, halt on out-of-range writes, clamp only via explicit syntax. What is not settled is which range is enforced in which build:
+
+- *Debug halts over the exact declared range, release over the representable range.* Conventional, cheap in release, but the two builds are then different programs. A value outside `range(0..100)` but inside a signed byte survives in release and halts in debug.
+- *Warn over the exact range, halt over the representable range, in all modes.* Build-independent.
+
+The second is worth the weight it costs, because of networking. State is bulk-synchronized between peers, so a peer on a debug build and a peer on a release build diverging on the same input is a desync, not just a debugging inconvenience. Build-dependent halt behaviour makes the declared range an invariant in one build and a hint in the other.

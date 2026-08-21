@@ -18,6 +18,8 @@ Numbers are byte aligned (rounded up to multiples of 8). Max storage efficiency 
 
 Signedness is taken from whether the declared range admits negative values. Width is the smallest supported storage size that holds the full range. An undeclared range defaults to signed 32-bit.
 
+Representation is never biased. A range is sized from `max(|min|, |max|)` and stored directly, rather than offset into an unsigned span — storing `range(-10..100)` as `v + 10` would make logical zero sit at bitwise 10, which breaks zero-initialization and puts a correction on every operation. Keeping the two zeros identical is what lets creation stay a memset.
+
 ### Decimals
 
 `precision(n)` is declared in decimal places. The implementation selects the smallest **power-of-two fractional width** that represents `n` decimal places — that is, the smallest `f` where `2^f >= 10^n` — so that scaling between stored and logical values is a bit shift rather than a division. Total width is the fractional width plus the bits needed for the declared integer range, plus one for sign where the range admits negatives.
@@ -26,9 +28,25 @@ For example: `precision(5)` needs `2^f >= 100000`, giving `f = 17`; a range of `
 
 These widths are a language-level contract; the resulting widths must stay as documented in the language spec.
 
+### Unified representation
+
+Internally there is one numeric representation: a scaled integer with a fractional width `f`. `integer` is the `f = 0` case of the same form, not a separate kind of value. The two surface keywords differ only in their defaults — `integer` defaults to `f = 0`, `decimal` to `f = 13`.
+
+This removes a special case rather than adding one. Mixed-precision arithmetic already needs a scale-reconciliation rule (`precision(2)` plus `precision(5)`); folding integers in makes `integer` combined with `decimal` an instance of that rule instead of a separate conversion path. Overload resolution generalizes the same way: "prefer the non-converted overload" is "prefer the smaller scale change". Width and signedness inference collapses to one algorithm over `(range, f)`.
+
+The unification is strictly internal. `integer` and `decimal` remain distinct types at the surface, since overload resolution and the author's declared intent both depend on the difference.
+
+Division needs care but not a second code path. `integer / integer` at `f = 0` truncates; decimal division pre-shifts by `f`. One operation parameterized by a compile-time constant.
+
 ### Computation
 
 These rules above apply to in-memory storage. For computations, the naive approach is to expand all numbers to the max width (eg, 64-bit). A possible optimization is to generate variants of math primitives and procs based on the actual sizes used. This is TBD and is excluisively a performance improvement. The naive method must be correct by itself.
+
+---
+
+## Enum Payloads
+
+An enum label may carry a payload, so an enum is laid out at the size of its largest variant plus its label discriminant. The size is therefore fixed and known at declaration, which is what keeps enums usable as component fields under the flat-copyable rule.
 
 ---
 
