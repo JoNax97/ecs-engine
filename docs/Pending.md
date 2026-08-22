@@ -119,6 +119,14 @@ The previous design required explicit per-query read/write declarations, on the 
 
 What remains open is the analysis pass itself — it is what makes parallelism a safe hint rather than an unchecked claim, and it is assumed everywhere and specified nowhere.
 
+**Inferred procedure purity** · `idea` · `3`
+
+A procedure's purity is derived by the compiler from the same analysis that extracts access sets: a proc that writes no ECS data and calls no impure proc is pure. Nothing is declared, so the common case carries no signature noise, which is the cost Verse pays for its `<computes>`/`<reads>`/`<writes>` effect specifiers and the reason its "learnable as a first language" goal is in tension with its own effect system.
+
+An optional annotation would let an author pin the intent, so a proc meant to stay pure fails compilation when a later edit makes it impure, rather than silently reclassifying.
+
+Two use sites motivate it. First, `where` currently guarantees no mutation only by position: the guarantee holds at the clause boundary and evaporates at a call boundary, since nothing in the spec says whether a proc invoked from `where` may write. Purity is the property that closes it. Second, calling a pure proc as a freestanding statement is dead code, and can be rejected the same way [Statements and Expressions](Language%20Spec.md#statements-and-expressions) already rejects a bare expression that discards its result.
+
 **`parallel`** · `idea` · `2`
 
 Highly speculative, and it is not the real design — it sits on top of one that does not exist yet.
@@ -355,6 +363,28 @@ Naming: the previous iteration used `halt` rather than `fail`, on the grounds th
 
 The spec has `fail` and `assert` ([Error Handling](Language%20Spec.md#error-handling)); propagation and recovery are unspecified. Proposed (Jose): proc calls automatically propagate failures upwards, with some keyword to catch them. Must be weighed against [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient).
 
+**Intrinsic fallibility** · `idea` · `4`
+
+An alternative to the entry above, and a generalization of it. Failure becomes a property of an expression rather than a construct layered on top of calls. An operation the compiler knows can fail — component access on an entity that may not have it, index out of bounds, division or modulo by zero, a dead handle, a relationship with no target, a value outside a declared range, a narrowing coercion — is *fallible*, and a fallible expression only type-checks inside a context that handles failure. `if` is that context; there is no catch keyword and no new syntax. The feature is subtraction.
+
+Fallibility is inferred, by the same pass as [Inferred procedure purity](#systems-scheduling-and-parallelism). A proc containing an unguarded fallible expression is itself fallible, so calling it is itself a fallible expression. That gives Jose's upward propagation, but typed: propagation is real, and every frame in the chain opted in visibly at compile time rather than by an invisible unwinding path.
+
+The line to hold is derived versus authored. Everything above is derived — the compiler knows the operation has a failure mode. `fail` and `assert` are authored, stay terminal, and are not catchable; if an invariant violation becomes recoverable, any caller can swallow it. This also settles the distinction [Halt unwind granularity](#errors-and-control-flow) needs, where expected absence is never a halt.
+
+Declared ranges are what makes this affordable here and not in Verse. Verse forces a guard on every division because it knows nothing about the divisor; ranges are already stated in this language, so `a / b` is infallible when `b`'s range excludes zero, and arithmetic is infallible when the result's range fits the target. Overflow stops being a separate concept — it is a result that does not fit the target's range. The ergonomic consequence inverts in the language's favour: a required guard is a signal that the author under-specified the domain, so the remedy is to state the range, which is [Domain over technicism](Design%20Principles.md#domain-over-technicism) exactly.
+
+It also collapses `has`. A fallible expression in `where` means the entity is filtered out, so structural presence and value predicates become one rule and `with` is its accelerable form. Open: filtered-because-absent and filtered-because-false become indistinguishable, which is a silent-skip path to accept or reject deliberately.
+
+Costs. Range arithmetic becomes load-bearing type checking rather than metadata — interval propagation through the arithmetic operators, decidable at the load boundary, and specified, since an equivalent-but-unrecognized range expression degrading to fallible is the same cost cliff as the `where` predicate-shape problem above. An infallible escape is needed where refinement cannot prove safety — saturating or wrapping operators, explicit at the call site, with fallible as the default. Viability is entirely a function of how strong the range analysis is: with weak refinement, guards proliferate and [Readable by non-engineers](Design%20Principles.md#readable-by-non-engineers) is lost, so this is not adoptable independently of that analysis. Runtime cost is a branch the author wrote, with no unwinding machinery, which suits the AOT and interpreter targets. Still to decide: that nothing binds on failure, including multi-return tuples; and the interaction with **Implicit transactional mutation** below, since a fallible proc that wrote before failing leaves partial mutation unless the write buffer is scoped to the fallible call.
+
+**Implicit transactional mutation** · `idea` · `3`
+
+Raised as a counterpart to Verse's `<transacts>` rollback, but arrived at from the opposite direction: Verse needs an author-declared effect and a general transactional memory, whereas the compiler here already sees every write to ECS data (see [Static access-set extraction](#systems-scheduling-and-parallelism)). If every mutation in a scope is known statically, the scope's writes can be buffered and applied atomically on successful exit, with structural changes deferred to a frame boundary.
+
+Two properties would follow. A halt would leave no partially mutated world, which is what makes [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient) a real guarantee rather than a best effort, and it directly affects what **Halt unwind granularity** above has to specify. Deferred structural change also removes the mid-iteration invalidation hazard that handle stability currently has to absorb.
+
+Open, and not obviously affordable. Buffering writes is a copy and a commit pass that the author did not ask for, which is exactly the shape [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) forbids, so the analysis has to establish that the buffer is bounded and statically sized before this can be considered. Also unresolved: whether the transactional scope is the query body, one entity's iteration, or the trigger; and whether reads within a scope observe its own uncommitted writes.
+
 **No early-exit form inside `do`** · `pending` · `2`
 
 Unspecified. Interacts with the `where`/`do` boundary above — an early exit is the refactor that silently forfeits acceleration.
@@ -392,6 +422,14 @@ Input, audio, asset loading, save files, network transport. Not excluded by the 
 Deliberate — evaluating the condition at run time is equally correct, so promising elimination would over-constrain the backend. But it leaves an author with no language-level assurance that a branch behind an absent module costs nothing, which is the shape of implicit cost [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) rules out.
 
 Resolution direction: tooling rather than spec — surface what was stripped and what survived, per [Show the machinery in motion](Design%20Principles.md#show-the-machinery-in-motion). A guarantee stated in the language would buy the same confidence at the cost of pinning the backend.
+
+**Const-eval of pure procedures** · `idea` · `2`
+
+[Constants](Language%20Spec.md#constants) binds a name to an expression built from literals and other constants, so any value that needs computation cannot be a constant and has to be hand-computed into a magic number. Verse's "just one language" principle is the opposite position — the same constructs run at compile time and run time — and the cheap version of it applies here: once purity is inferred ([Inferred procedure purity](#systems-scheduling-and-parallelism)), a pure proc called with constant arguments is itself a constant, and the load-time evaluator needed for load-time conditionals already exists. Derived constants — lookup tables, precomputed curves, a size from a formula — become expressible without a separate mechanism.
+
+Same inference-plus-optional-annotation shape as purity. Const-eval is implicit wherever the arguments are constant, so the common case carries no ceremony; an optional annotation pins the intent, so a binding meant to be resolved at load time fails compilation if a later edit makes it runtime-dependent rather than silently becoming a per-execution computation.
+
+Open: interaction with the existing rule that constants depending on a load-time conditional cannot determine data layout, since a const-eval'd proc widens what can reach an array bound or range annotation; and termination, since a const-eval'd call must complete at the load boundary, which ties it to **Bounded execution** above.
 
 **Bundled source produces private types** · `pending` · `1`
 
