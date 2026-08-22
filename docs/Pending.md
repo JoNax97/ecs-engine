@@ -18,43 +18,49 @@ Everything known to be unresolved, organized by area. Recording an item here is 
 
 **Storage model** · `contradiction` · `5`
 
-Undecided, needs its own design pass. Two candidates, both still live:
+Undecided, needs its own design pass. The constraints any answer must satisfy are in [Engine Core](Engine%20Core.md#constraints). The two live candidates:
 
-- *Archetype/table storage.* Entities are grouped by component set and stored contiguously. Hazard identified previously: adding a component to one entity can swap-remove and relocate an unrelated entity in the same table, invalidating handles held to it mid-frame. Deferring removal does not fix this, because adds relocate too.
-- *Inverted hierarchical bitmap storage.* Each component owns a presence bitmap over fixed entity slots; entities never move. Eliminates the relocation hazard structurally rather than mitigating it. Empty bitmap blocks do not materialize storage, so the memory cost depends on entity-ID clustering rather than on the architecture.
+- *Archetype/table storage.* Entities are grouped by component set and stored contiguously. Hazard: structural changes move the entity in memory, invalidating handles. Deferring removal does not fix this, because adds relocate too — so it fails the handle-stability constraint as stated.
+- *Inverted hierarchical bitmap storage.* Each component owns a bitmap over entity slots; entities never move, which satisfies handle stability structurally. Empty bitmap blocks do not materialize storage, so the memory cost depends on entity-ID clustering rather than on the architecture.
 
-Until this is settled, "chunk" (interchangeably "table") is used throughout to mean the most granular partition that holds components, without committing to what that partition actually is. The ownership entry below goes further and presumes archetype partitioning, which it has not earned.
+The ownership entry below presumes archetype partitioning, which it has not earned.
 
-This is the root blocker for the rest of this section, for `changed` on a non-owning peer, and for handle-validity semantics. It is an engine decision, and there is currently no engine design document — only [Design Principles](Design%20Principles.md).
+This is the root blocker for the rest of this section, for `changed` on a non-owning peer, and for handle-validity semantics — whether a handle can be invalidated by an unrelated entity's mutation is a property of the storage model, not of the handle.
 
-**Component field legality — decided, not yet written into the spec** · `discrepancy` · `3`
+**Entity identity and generation** · `pending` · `4`
 
-The engine synchronizes state as per-frame chunk copies, so a component's fields must be flat-copyable. Nothing in [Primitive Types](Language%20Spec.md#primitive-types) says so, and the unsafe form is currently the shorter one (`Slots[]` vs `Slots[30]`, `string name` vs `string tag length(16)`), making it the easier thing to write.
+Unspecified. How an entity ID is composed, whether it carries a generation counter, and what a stale ID resolves to. Blocked on the storage model.
 
-Rule settled in design, still absent from the spec:
+**Copy granularity** · `pending` · `3`
 
-- Inside a `define value` or `define component`, storage class must be stated. A bare `string` or `[]` is a compile error there.
-- A stated bound means inline and free: `string name length(16)`, `integer Slots[30]`.
-- `dynamic` is permitted but costlier — the field holds a chunk-relative offset into ECS-managed memory rather than a pointer, so the chunk still blind-copies as a unit. Explicit because it is expensive, per [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs).
-- Locals, proc params and query bindings keep the relaxed form: bare means dynamic, no annotation. The requirement attaches to declared data types, not to code, because a `value`'s layout cannot depend on where it is used.
-- Dynamic data is allowed only at a component's top level. A `value` containing a `dynamic` field is therefore illegal inside a component. See [Nested dynamic data in components](#nested-dynamic-data-in-components) for the option this forecloses.
+Whether the unit of transfer between peers is the memory block, a sub-range, or a single component is unexamined. Interacts directly with the storage decision.
 
-Eligibility is decided by taint propagation — a dynamic field taints the `value` containing it, and the taint propagates outward to disqualify any component holding it. This reuses the previous iteration's struct-tier inference wholesale, including the trick of storing the offending field path alongside the taint at declaration time, so reporting a failure does not require re-walking the type. [Load-time constant taint](Language%20Implementation.md#load-time-constant-taint) is the same mechanism and should share an implementation.
+**The synchronization path** · `pending` · `3`
 
-Still open: whether a `dynamic` component field is directly addressable or handle-like — holding a reference to one across a frame boundary is the case that would bite.
+Memory block selection, delta compression and peer topology are unwritten. [Frame Model and Synchronization](Engine%20Core.md#frame-model-and-synchronization) records only the premise the rest of the design leans on: per-frame chunk copies, with a peer either owning entities or receiving them. That premise is what `non_serialized`, bit packing and the flat-copyable rule are all written against.
+
+**Storage for pointer-like component data** · `pending` · `3`
+
+ECS-managed buffers — the storage `dynamic` selects — have no design. Related to addressability below.
+
+**Addressability of a `dynamic` component field** · `pending` · `3`
+
+The field legality rule itself is now written up — [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) at the engine level, [Storage](Language%20Spec.md#storage) at the language level, [Nested dynamic data in components](#storage-and-memory-layout) for the option it forecloses.
+
+What that write-up does not settle: whether a `dynamic` component field is directly addressable or handle-like. Holding a reference to one across a frame boundary is the case that would bite, which makes this the same question as handle validity below, asked of engine-managed memory rather than of an entity.
 
 **Nested dynamic data in components** · `idea` · `2`
 
 Option deliberately not taken, recorded because it is a strict superset of the rule above — nothing written under the current rule becomes illegal if this is adopted later.
 
-The idea: exploit components having a fixed layout, so nested fields resolve to static offsets, and design a single pointer representation that discriminates ECS-managed memory from general memory while occupying the same space. Dynamic data could then nest at any depth rather than only at a component's top level.
+The idea: exploit components' flat layout, and design a single pointer representation that discriminates ECS-managed memory from general memory while occupying the same space. Dynamic data could then nest at any depth rather than only at a component's top level.
 
 Two things make it hard:
 
-- **The discriminant cannot be dynamic.** A chunk-relative offset survives being blind-copied to a peer; a general-memory pointer does not. If the mode were decided at run time, validity of a copy would depend on runtime state, leaving only a per-pointer check at sync time (a recurring per-frame cost) or silent corruption in networked builds. So the mode must be static — decided by where the field lives.
+- **The discriminant cannot be dynamic.** A block-relative offset survives being blind-copied to a peer; a general-memory pointer does not. If the mode were decided at run time, validity of a copy would depend on runtime state, leaving only a per-pointer check at sync time (a recurring per-frame cost) or silent corruption in networked builds. So the mode must be static — decided by where the field lives.
 - **That reintroduces two layouts per `value`**, now identical in size but different in meaning. Copying a stack-side value into a component field stops being a copy and becomes a deep copy plus pointer fixup, at a cost proportional to the value's dynamic content. Coherent only if promotion into a component is an explicit named operation, never a silent assignment — which is where the previous iteration independently landed ([Previous Iteration.md:34](Previous%20Iteration.md)).
 
-Blocked on the storage model regardless: "chunk-relative" presumes archetype storage. Under inverted-bitmap storage entities never move and the per-component arrays are the storage, so there may be no chunk to be relative to in the same sense.
+Blocked on the storage model regardless: "block-relative" presumes archetype storage. Under inverted-bitmap storage entities never move and the per-component arrays are the storage, so there may be no block to be relative to in the same sense.
 
 **Flattened component layout** · `mechanism` · `3`
 
@@ -69,7 +75,7 @@ Components have a fixed layout, so nested `value` fields resolve to static offse
 
 Carried over from an earlier design layer, not yet reconciled with the current constructs.
 
-The previous iteration's answer to absence is the handle state enum described under [Asynchronous operations](#asynchronous-operations) — `Pending` / `Ready` / `Failed` / `Dead`, with `.is_valid()` true only for `Ready`. There is no null and no separate `Result` type; absence, failure and pending completion are the same three-valued question asked of a handle.
+The previous iteration's answer to absence is the handle state enum described under [Asynchronous operations](#storage-and-memory-layout) — `Pending` / `Ready` / `Failed` / `Dead`, with `.is_valid()` true only for `Ready`. There is no null and no separate `Result` type; absence, failure and pending completion are the same three-valued question asked of a handle.
 
 Frame-tier memory — bump-allocated, discarded at frame end — is the one tier with worked-out reasoning; it is what would make [GroupBy](#queries-and-predicates) technically safe.
 
@@ -87,7 +93,7 @@ Depends on the host embedding API, which is unwritten — see [Runtime & Deploym
 
 **Ownership and `non_serialized` have layout consequences** · `pending` · `4`
 
-Both partition storage: a chunk cannot be blind-copied in a single direction if ownership varies within it, and a non-serialized component cannot share a chunk with synced data. The engine is expected to organize memory so layout matches these constraints — the same mechanism that will cover streaming/partial loads and interest management.
+Both partition storage: a block cannot be blind-copied in a single direction if ownership varies within it, and a non-serialized component cannot share a block with synced data. The engine is expected to organize memory so layout matches these constraints — the same mechanism that will cover streaming/partial loads and interest management.
 
 Open at the language level: how ownership is expressed. Expressing it structurally (a tag or relationship rather than a field) would let archetype partitioning segregate owned from remote entities automatically, and keep it a free presence check in `with`.
 
@@ -101,7 +107,7 @@ Mechanism side is tracked in [Language Implementation](Language%20Implementation
 
 System scheduling and dependency declaration are unspecified. Related and unresolved: whether **systems become a first-class construct**. They were previously judged unnecessary — a query bound to a trigger already covers what a system does — but expressing dependencies may require a named, addressable thing to hang them on, and anonymous self-driving queries give nothing to reference. Raised in conversation with a colleague; not previously written down anywhere.
 
-Note the doc is currently inconsistent on this: [ECS focused](Design%20Principles.md#ecs-focused) lists systems among the primitives the design is organized around, while the language has no system construct at all.
+Note the doc is currently inconsistent on this: [ECS focused](Design%20Principles.md#ecs-focused) lists systems among the primitives the design is organized around, while the language has no system construct at all. Accepted for now. Whichever way this lands, that principle has to be settled with it — reworded if systems become first-class, with the primitive struck from the list if they do not.
 
 Direction settled: a system is an organization and scheduling construct, not a behaviour container. Two pieces of the previous iteration's design ([Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#queries--systems)) are superseded and should not be carried over — `run_query`, made redundant by named queries already being invocable like procedures, and the overridable `tick()` method, replaced by an `on tick` binding. What survives is the shape: a zero-argument block the engine instantiates and script never constructs.
 
@@ -157,7 +163,7 @@ e.Health.current          // one lookup, one offset
 e.Position.value.x        // one lookup, two offsets
 ```
 
-Two reasons. It is the same symbol written in `with Health`, `create entity with Health(...)` and `if e has Health`, so lowercasing it only in access position makes one symbol change case by context. And it marks where the cost is: component access is a keyed lookup that can miss and halt, while field access is a static offset under [flattened component layout](#flattened-component-layout).
+Two reasons. It is the same symbol written in `with Health`, `create entity with Health(...)` and `if e has Health`, so lowercasing it only in access position makes one symbol change case by context. And it marks where the cost is: component access is a keyed lookup that can miss and halt, while field access is a static offset under [flattened component layout](#storage-and-memory-layout).
 
 The invariant that falls out: a well-formed access has exactly one PascalCase segment after the entity handle. Everything before it is a handle, everything after is free offsets. Two capitals in a chain would mean two lookups, and no construct produces that, so it reads as an error rather than a hidden cost.
 
@@ -183,7 +189,7 @@ Traits declare **fields only**, never procedures. A field is satisfied three way
 
 Two things to reconcile when this is taken up:
 
-- Proc-backed trait fields break the assumption that field access is a plain read or write, which [static access-set extraction](#systems-scheduling-and-parallelism) and [flattened component layout](#flattened-component-layout) both rely on.
+- Proc-backed trait fields break the assumption that field access is a plain read or write, which [static access-set extraction](#systems-scheduling-and-parallelism) and [flattened component layout](#storage-and-memory-layout) both rely on.
 - A hand-written concrete generic query taking precedence over the autogenerated one is a specialization rule, and needs squaring with the overload rules above.
 
 **Components as a single type** · `idea` · `3`
@@ -209,6 +215,10 @@ Three directions to explore, not necessarily together:
 - Flag enums — power-of-two labels with set operations, against the current rule that a label's value comes from declaration order.
 
 Runs into the alignment rule in [Numeric Representation](Language%20Implementation.md#numeric-representation): numbers are byte-aligned, trading storage efficiency for direct addressability. Packed fields are not directly addressable, so any of these needs a story for how a packed field is read, written and named in an access set. Jose's optional-fields proposal in the declaration syntax pass carries the same idea from a different direction.
+
+**Tuples** · `pending` · `3`
+
+[Tuples](Language%20Spec.md#tuples) exist only as the return type of a multi-value proc. Whether they are a general type — declarable, storable in a component, bindable — is unspecified. A storable tuple would need a position under the flat-copyable rule.
 
 **Value constants** · `pending` · `2`
 
@@ -307,6 +317,10 @@ Compile to presence-only bitmap checks with no target materialization — the ch
 
 ## Events and Change Detection
 
+**Change-tracking surface** · `pending` · `4`
+
+[Change Tracking](Language%20Spec.md#change-tracking) states only that `changed(Component)` fires on the frame a matching component's value changes. Unspecified: granularity (component or field), what counts as a change when a write stores the same value, how it interacts with `with changed` in a `for` clause, and when the flag is cleared relative to system order.
+
 **Custom event declaration** · `pending` · `4`
 
 Declaration syntax for custom, game-level events (e.g. `player_joined`) beyond the built-in `tick` / `changed` / `load` triggers. Binding a parameterized event to a query/proc without the trigger's parameter colliding with a `with`-bound name (e.g. `on dead(unit)` alongside a `with`-bound `unit`) is parked pending this.
@@ -333,7 +347,7 @@ Unreconciled, and newly reopened. The previous design flagged loop and recursion
 
 That granularity is what makes [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient) concrete. It also draws a line the current spec does not: expected absence (a dead handle, an unloaded resource, a missing optional component) is never a halt, and is handled through handle state instead.
 
-The previous iteration kept the boundary unambiguous by forbidding a query from invoking another query. The current spec explicitly permits it — [Declaring and triggering](Language%20Spec.md#declaring-and-triggering) has named queries "invoked directly by name from inside a procedure or another query's body" — so the question the ban avoided is live here. A halt inside a nested query has no defined stopping point: the inner query's current entity, the outer one's, or the whole trigger.
+The previous iteration kept the boundary unambiguous by forbidding a query from invoking another query. The current spec has named queries "manually invoked" ([Queries](Language%20Spec.md#queries)) and places no restriction on where from, so the question the ban avoided is live here. A halt inside a nested query has no defined stopping point: the inner query's current entity, the outer one's, or the whole trigger.
 
 Naming: the previous iteration used `halt` rather than `fail`, on the grounds that it communicates only the current entry point stopping. The current spec uses `fail`.
 
@@ -352,6 +366,26 @@ With the condition first (Jose).
 ---
 
 ## Compilation and Backend
+
+**Width-specialized computation** · `idea` · `2`
+
+[Computation](Language%20Implementation.md#computation) expands operands to 64 bits. Generating variants of math primitives and procs against the widths actually used would cut that, but it is exclusively a performance improvement — the naive path must be correct on its own.
+
+**Host embedding API** · `pending` · `5`
+
+What the engine exposes to guest modules and how capabilities are granted is unwritten. Blocks [asynchronous operations](#storage-and-memory-layout) and the whole I/O surface below.
+
+**Reload semantics for live state** · `pending` · `4`
+
+[Hot reload](Runtime%20&%20Deployment.md#hot-reload) swaps a module's Wasm object, but what happens to entities and component data whose defining module is being swapped is undefined. Interacts with file-level mutable state, if it exists — see [Declaration syntax pass](#data-modeling-and-declaration-syntax).
+
+**Observable agreement between backends** · `pending` · `3`
+
+Whether AOT and interpreted backends must agree observably — execution bounds, numeric edge cases — or may differ. Fixed-point arithmetic removes most of the float divergence risk, but bounded execution (see [Errors and Control Flow](#errors-and-control-flow)) is decided per backend unless this is pinned.
+
+**I/O surface** · `pending` · `3`
+
+Input, audio, asset loading, save files, network transport. Not excluded by the design, simply unspecified as host-exposed capabilities. Blocked on the host embedding API.
 
 **Load-time branch elimination is an optimization, not a guarantee** · `discrepancy` · `2`
 

@@ -14,15 +14,13 @@ Entities, components, systems, queries and relationships are the primitives the 
 
 ### Transparent networking and serialization
 
-Gameplay code should ideally not be aware that networking exists. Gameplay code should be written once and be executed where it needs to, transparently.
-
-The model is per-frame bulk synchronization: the engine copies entire data blocks between peers each frame.There are consequently no sync-var annotations, no RPCs, and no authority plumbing in gameplay code.
+Gameplay code should not be aware that networking exists. It is written once and executed where it needs to be, transparently. No sync-var annotations, no RPCs, no authority plumbing.
 
 Where the author genuinely must intervene, the intervention is declarative metadata attached to a declaration — marking a component `non_serialized`, or declaring peer ownership over a piece of data — never control flow.
 
 ### Transparent and cheap serialization
 
-Data structures and allocation strategies are designed for blink memory copying, with no per-element processing, encoding, or pointer chasing.
+Data structures and allocation strategies are designed for blind memory copying, with no per-element processing, encoding, or pointer chasing.
 
 ### Data layout follows declared intent
 
@@ -52,7 +50,7 @@ Nothing executes that the author did not ask for, and nothing expensive looks fr
 
 The language should be legible to designers and modders, not only to programmers. Minimal punctuation, plain English keywords, no ceremony. The domain and intent should stick out unimpeded.
 
-### Minimize language breadth and feature creep.
+### Minimize language breadth and feature creep
 
 The language stays small by declining features rather than accommodating them. Provide handy features for the common case, and building blocks for the uncommon one. 
 Reuse syntax and mechanisms across contexts when possible.
@@ -67,7 +65,7 @@ Fast paths are earned case by case: a feature qualifies when it can be mounted o
 
 One script artifact runs on every target. Anything genuinely platform- or architecture-specific is abstracted away by the engine and never reaches the script layer — a script cannot observe word size, endianness, or which platform it is running on, so there is no way to write one that only works on some of them.
 
-This is what makes the [compile time / load time split](Language%20Spec.md#compile-time-and-load-time) tractable: the only thing that varies between deployments is which modules are present, and that is resolved at the load boundary.
+The only thing that varies between deployments is which modules are present, and that is resolved at the load boundary.
 
 ### Resolve at compile/load time
 
@@ -75,7 +73,7 @@ Much of the heavy lifting of the language is translating user intent into concre
 
 The load boundary is the last point at which this may happen. Any pruning or specialization the script layer relies on must be decidable there, before execution begins — nothing is deferred to run time to be sorted out later.
 
-### Fail fast, keep the engine resilient.
+### Fail fast, keep the engine resilient
 
 Errors halt script execution and return control to the host. A script must never bring down the entire game.
 
@@ -85,10 +83,10 @@ Errors halt script execution and return control to the host. A script must never
 
 ### Show the machinery in motion
 
-With the language and runtime making so many decisions on behalf of the user, it's important to give transparency on hoy things are actually running.
+The language and runtime make many decisions on the author's behalf. Tooling must show what those decisions were and how the result actually runs.
 
 ### Give visibility into performance and costs
 
-Perfomance characteristics of the data and code are surfaced through tooling rather than written in source — hovering a declaration to see its size, analysis passes, warnings on oversized data.
+Performance characteristics of the data and code are surfaced through tooling rather than written in source — hovering a declaration to see its size, analysis passes, warnings on oversized data.
 
 A cost that can be neither stated as a language-level guarantee nor surfaced by tooling is a design smell, and the construct that carries it should be reconsidered.

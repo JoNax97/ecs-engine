@@ -153,7 +153,7 @@ The `boolean` type is a boolean. What else do you want.
 
 ### Numeric Types
 
-Numeric types are designed to allow for gradual refinement based on usage and performance needs. This means there are only 2 numeric types: `integer` and `decimal`.  Instead of manually encoding characteristics like width, signedness and precision into separate types, they are automatically determined based on constraints.
+There are only two numeric types: `integer` and `decimal`. Width, signedness and precision are not encoded into separate types; they are derived from the declared constraints, so a declaration can be refined by adding an annotation rather than by changing its type.
 
 For integer types, storage width and signedness is inferred from its declared range. For example:
 
@@ -207,7 +207,7 @@ Inside a `define`d type, an array must state its storage: either a bound, or `dy
 
 ### Tuples
 
- TODO
+Unspecified beyond their use as multiple return values; see [Pending](Pending.md#data-modeling-and-declaration-syntax).
 
 ### Ranges
 
@@ -396,7 +396,7 @@ define relationship Likes (
 )
 ```
  
- | TODO transitive and ephemeral, exclusive relationships
+Transitive, ephemeral and exclusive relationships are unspecified; see [Pending](Pending.md#relationships).
 
 
 ### Visibility
@@ -420,9 +420,9 @@ Defaults differ by category, following ECS principles:
 
 ### Storage
  
-Fields inside defined types are inlined by default. Most types have a fixed size so this is not an issue. However, for types that might have a dynamic size, like strings and arrays, the user needs to specify a fixed size or explicitly mark them as `dynamic`. 
+Fields inside defined types are inlined by default. Most types have a fixed size so this is not an issue. However, for types that might have a dynamic size, like strings and arrays, the user must specify a fixed size or explicitly mark them as `dynamic`.
 
-`dynamic` opts a field out of inline storage. The field's storage is then managed by the runtime and the type holds a reference to it. This is transparent for the user but must be spelled out because it's more costly than the inline form.
+`dynamic` opts a field out of inline storage. The field's storage is then managed by the runtime and the field holds a reference to it. This is transparent for the user but must be spelled out because it's more costly than the inline form.
 
 ```
 define value Label (
@@ -550,9 +550,9 @@ end
 
 ### Change Tracking
 
-// TODO fill this section
-- `changed(Component)` — fires on the frame a matching component's value
-  changes.
+`changed(Component)` fires on the frame a matching component's value changes.
+
+The rest of the change-tracking surface is unwritten; see [Pending](Pending.md#events-and-change-detection).
  
 ### Destruction
  
