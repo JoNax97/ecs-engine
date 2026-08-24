@@ -241,6 +241,8 @@ Events are the main way by which scripts hook into the running game. There are n
 
 Use the `on` keyword to listen to events. Both procedures and queries can be hooked up to events. Anonymous blocks can also be declared as listeners.
 
+Listeners are bound statically. Every listener is declared at the top level and is resolved by the load boundary; a listener cannot be registered, replaced or removed while the game runs. A listener that should not act is expressed by matching nothing, or pruned entirely by a [load-time conditional](#load-time-conditionals) — not by unsubscribing.
+
 ```
 on load do
  ...  | initialization

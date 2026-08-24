@@ -81,6 +81,8 @@ Frame-tier memory — bump-allocated, discarded at frame end — is the one tier
 
 Null coalescing operator (Jose) depends on absence semantics being settled first.
 
+The shape that keeps appearing in practice is a lookup that may fail, immediately bound and used — a conditional binding, where the entity or value is in scope only on the success path. Whatever absence mechanism is chosen has to make that spelling cheap, since it is the common case rather than an edge one.
+
 **Asynchronous operations** · `pending` · `4`
 
 Nothing in the current spec addresses operations that do not complete within the frame they were requested — resource and asset loading being the obvious case. Direction from [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#handles--validity): the request returns a handle immediately, and the handle's state enum (`Pending` / `Ready` / `Failed` / `Dead`) is the completion signal. No futures, no callbacks, no suspension — the author polls or matches on state.
@@ -112,6 +114,18 @@ Note the doc is currently inconsistent on this: [ECS focused](Design%20Principle
 Direction settled: a system is an organization and scheduling construct, not a behaviour container. Two pieces of the previous iteration's design ([Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#queries--systems)) are superseded and should not be carried over — `run_query`, made redundant by named queries already being invocable like procedures, and the overridable `tick()` method, replaced by an `on tick` binding. What survives is the shape: a zero-argument block the engine instantiates and script never constructs.
 
 Still to design: how dependencies are declared, whether ordering within a system is positional or explicit, and whether a system is the thing dependencies attach to or merely a namespace.
+
+**Gating machinery on a global condition** · `pending` · `4`
+
+A session-wide condition — PvP enabled, a phase change — engages or disengages a whole set of behaviour. Since [listeners are statically bound](Language%20Spec.md#events), the only way to express this today is to write queries that match nothing while the condition is off. That is inadequate on two counts: it forces the global condition to be denormalized into every affected entity, which is the worst available data layout, and the match still costs something per tick.
+
+Three candidate answers, and they overlap, so at most one should be adopted without a case that forces a second.
+
+- *Singleton entity with a loop-invariant term.* Bind a single-cardinality entity and test its field. A term referencing only that binding could be evaluated once and the scan skipped. Rejected as stated, because it relies on unstated optimizer behaviour — the same trap already recorded in [the `with`/`where` boundary](#queries-and-predicates), where recognized and unrecognized predicate shapes are indistinguishable in the syntax.
+- *An explicit guard clause,* positioned before `for` and evaluated once. What makes it honest is a restriction rather than a promise: nothing is bound at that position, so the clause may reference no binding and therefore structurally cannot run per entity. Open within it — the keyword, since `when` already introduces `match` arms; whether a guard may call a proc, which requires [purity](#systems-scheduling-and-parallelism) to be settled first; and whether a false guard fires the `else` of [empty-match fallback](#queries-and-predicates), since "never ran" and "matched nothing" are different states.
+- *Gating at the system level.* The likeliest fit, because the granularity matches the problem — a mode change engages a set of queries, not one — and a scheduler skipping a system costs a single branch rather than a per-query check. It also needs a named, addressable thing to gate, which is a second and independent argument for systems becoming first-class.
+
+Narrow the problem before choosing. A condition fixed at session start is already fully handled by [load-time conditionals](Language%20Spec.md#load-time-conditionals) at no runtime cost; only conditions that genuinely toggle mid-session justify new machinery, and that set may be small.
 
 **Static access-set extraction** · `pending` · `5`
 
@@ -210,6 +224,22 @@ Worth evaluating against [Domain over technicism](Design%20Principles.md#domain-
 
 [Procedures](Language%20Spec.md#procedures) states there are no lambdas or closures. Three further restrictions from the previous iteration are unstated: procedures cannot be stored in components, cannot be held in persistent state, and cannot be used as callbacks. Also unstated is dot-sugar on the first parameter — `effect.get_magnitude()` for `get_magnitude(effect)` — which the overload rules above assume exists.
 
+**`where` clause on a procedure** · `idea` · `3`
+
+A side-effect-free clause at the head of a proc, stating the domain its parameters must satisfy. Semantics are contract failure in every context — never filtering. What varies is the response: a direct call that violates the contract is an error, while an event dispatch that violates it is silently skipped, because skipping is what an event's error response already is. The filter-like behaviour is therefore a consequence of the dispatch context, not a second meaning of the clause.
+
+Motivated as a terser and more declarative alternative to a stack of `assert`/`fail` at the top of a body. Being declarative is the point: a contract in the signature can be displayed by tooling per [Show the machinery in motion](Design%20Principles.md#show-the-machinery-in-motion), where the equivalent imperative guards cannot.
+
+It generalizes machinery the language already has. `integer ammo range(0..999)` is a declarative constraint on a parameter's value; a `where` extends that to constraints a range cannot express. It is also the input-side twin of [an entity type carrying a component invariant](#data-modeling-and-declaration-syntax) — `where e has Flammable` states at the boundary what every caller would otherwise re-check.
+
+The hard question is whether a violation halts or propagates catchably. [Intrinsic fallibility](#errors-and-control-flow) holds the line at derived versus authored: derived failures are catchable, while authored `fail`/`assert` stay terminal so that an invariant violation cannot be swallowed by a caller. A `where` is authored, which by that line makes it terminal — and terminal is not what this idea wants.
+
+The resolution worth testing: a `where` naming a condition that is *already* a derived failure mode — a component that may be absent, a value outside a declared range, a handle that may be dead — is not introducing a failure, it is hoisting an existing one to the boundary. Under that reading it stays catchable without weakening the line, and a `where` over an arbitrary predicate is simply an `assert` and stays terminal. That splits the construct by predicate shape rather than by context, which is checkable.
+
+Open: purity, which waits on [Inferred procedure purity](#systems-scheduling-and-parallelism); whether the clause may read ECS state or only parameters, since the former makes it a per-call runtime cost rather than a static contract; and whether the dispatch case needs [custom event declaration](#events-and-change-detection) settled first, as it presumes parameterized listeners.
+
+Note the breadth pressure. This would be the third `where`-shaped construct alongside the query clause and the proposed [guard clause](#systems-scheduling-and-parallelism). Reusing syntax across contexts is a stated principle, but three contexts with three cost models is how a keyword stops carrying meaning.
+
 **`requires` on components** · `mechanism` · `2`
 
 An alternative to inheritance: a component declares a dependency on another. Cascade-removal reuses the existing end-of-frame flush pass, the same mechanism as relationship deletion — reuse, not new machinery. No syntax, no semantics for conflicts or diamond cases.
@@ -231,6 +261,22 @@ Runs into the alignment rule in [Numeric Representation](Language%20Implementati
 **Value constants** · `pending` · `2`
 
 Values like `Vector3.left`. Used in [LoomScript Examples](LoomScript%20Examples.md), unspecified in the language.
+
+**Enum payload access outside `match`** · `pending` · `4`
+
+[Enums](Language%20Spec.md#enums) define variants that may carry payloads, but the only described way to reach a payload is a `match` arm binding. Writing an enum-valued component in imperative code produced three inconsistent spellings in the same body — the variant as a structural term in a `for` clause, the variant as a boolean predicate on a bound entity, and the variant used as if it were a component in order to reach its payload field. Only the first is specified.
+
+Also unresolved: assigning a payload-carrying variant without supplying its payload. Nothing in the spec says whether that is an error, or what the payload holds afterwards.
+
+Related: whether a variant should be readable as a predicate at all, given that presence-style tests already exist for components.
+
+**Component single-field coercion** · `idea` · `2`
+
+A component whose only field is named `value` could be readable as that field directly — `entity.Position` rather than `entity.Position.value`. Removes the most repeated noise in practice, since single-field wrapper components are the common case. Cost is a second access form for one shape of declaration, and an ambiguity wherever the component itself is the intended operand.
+
+**Entity type carrying a component invariant** · `idea` · `2`
+
+A proc returning `Entity` says nothing about what that entity has, so every caller re-checks. A return type of the form "entity known to have these components" would let the check happen once, at the boundary. Interacts with absence semantics, since such a proc usually also has to express "found nothing".
 
 ---
 
@@ -293,6 +339,19 @@ No syntax for either. Open whether the cursor is author-visible state or a query
 
 Ruled out of the query language, but worth recording why the ruling might not hold. The objection that killed it was that materialized results reopen the heap-in-component hazard — and that objection does not apply if the result is scoped to frame-tier memory: bump-allocated, discarded at frame end, never touching a component. A transient, non-addressable GroupBy is therefore technically safe. It was rejected on the honest-costing bar instead — it did not clearly earn its cost — which is a design-taste call, not an architectural blocker. Revisit if a real use case appears.
 
+**Empty-match fallback, and outer/inner asymmetry in a `for` clause** · `pending` · `4`
+
+A recurring shape has no spelling: run a body per match, and run something else once when an entity matched nothing. Written today it needs a manual flag variable set inside the inner iteration and tested after it, which is noise, and it is easy to get wrong — applying per-non-match what was meant to apply once.
+
+An `else` block on the iteration covers it, with the meaning "the body never ran". Note that Python's `for`/`else` means "no `break` occurred"; the intended meaning here is Jinja's.
+
+The blocker is not the keyword. A [`for` clause](Language%20Spec.md#the-for-clause) today is symmetric — a flat set of bindings the compiler may order freely — so `else` on it can only mean "the whole query produced nothing". Per-entity fallback requires an outer binding and an inner one, which the clause has no way to express. Two candidate shapes:
+
+- *A query nested inside another query's `do` block.* Adds no new clause grammar, and gives a real outer body with statements before and after the inner iteration. But whether a query is a statement at all is unspecified, as is an inner binding referencing an outer one, and `for` would then introduce either a loop or a query depending on `in` versus `with`.
+- *Per-level `do`/`else` blocks within one query.* Keeps a single construct, but needs a second optional block per level, and distinguishes nesting from cross-product by punctuation alone — a comma between bindings versus a repeated `for`.
+
+Whichever is chosen, binding order becomes semantically significant and the compiler loses the freedom to reorder the join. That is a cost model change, so it is contract rather than mechanism, and it works against the reordering freedom [The documented `with`/`where` boundary is not the one that costs](#queries-and-predicates) relies on.
+
 ---
 
 ## Relationships
@@ -338,6 +397,34 @@ Declaration syntax for custom, game-level events (e.g. `player_joined`) beyond t
 Remote state arrives as a raw chunk write rather than a script-initiated mutation. If the engine diffs received chunks and fires `changed`, that is a recurring per-frame cost, against the no-implicit-costs principle. If it does not fire, reactive gameplay code behaves differently on owning and remote peers, which is precisely the networking awareness the design aims to remove. Unresolved; the language cannot stay silent, as `changed` is author-visible.
 
 Mechanism side is tracked in [Language Implementation](Language%20Implementation.md#not-yet-written).
+
+**Single-use dynamic listeners** · `shelved` · `2`
+
+Proposed form: `on <event> do once ... end`, written inside a proc or query body, registering a listener that fires at most once. The motivating case is a second-order effect expressed next to its cause — marking an entity and stating the reaction to a later event in the same place, rather than in a distant query.
+
+Rejected because a registration capturing an enclosing binding is a closure, and its environment has to survive the call frame. That makes it game-tier state that is neither fixed-size nor pointer-free, so it fails [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) and cannot be synchronized — peers would then disagree on second-order effects, which is the networking awareness [Transparent networking](Design%20Principles.md#transparent-networking-and-serialization) removes. It also requires a runtime subscriber list, against [Resolve at compile/load time](Design%20Principles.md#resolve-at-compileload-time), and leaves pending callbacks pointing into a module that [hot reload](#compilation-and-backend) may swap. Same shape as the argument that ruled out coroutines.
+
+What it was reaching for is already expressible: adding a marker component *is* the subscription, and a static query over that marker *is* the handler. That form is data rather than code, so it copies, syncs, survives reload, and is idempotent by construction — the component is present or absent, never registered twice. Removing the marker is the `once`.
+
+Worth revisiting only in the restricted form where capture is limited to a single entity binding. The captured environment is then exactly a marker component, and the construct becomes a static transform rather than a runtime registration. Open even then: what the generated component is called, whether it is author-visible, and whether the saved locality is worth a construct at all.
+
+**Deferred execution within a frame** · `idea` · `2`
+
+Separated out of the entry above because it is not a listener. The case is "run this once, later" — deferring expensive cleanup past the current point of execution — with nothing captured.
+
+With no capture the cost picture changes completely. Each deferral site is a fixed syntactic location, so what persists is one pending flag per site, sized at compile time. No allocation, no runtime table, and the flag lives in the module that owns it, so a reload takes both together.
+
+Open: whether the resume point is the next tick or a defined point within the current frame; whether two calls before that point coalesce into one run or queue two; whether deferred work is game-tier state that synchronizes, or local by construction and therefore never serialized.
+
+Note the overlap with existing machinery. For an entity, deferral is already expressible as a marker component plus a static query. The capture-free case needs a construct only because there is no entity to hold the marker — the same hole as file-level mutable state in [Declaration syntax pass](#data-modeling-and-declaration-syntax). Settle that first; a singleton store may leave this with no remaining job.
+
+**Periodic scheduling has no construct, and the obvious spelling is wrong** · `pending` · `4`
+
+"Do this every N seconds" is ubiquitous in gameplay code and has no support. Written by hand it becomes an accumulator compared against a period, and the natural spelling — a modulo of the accumulated time against the period — is silently wrong: it is true on nearly every tick rather than once per period. Getting it right requires an explicit crossing test against the previous tick's value, which is neither obvious nor discoverable.
+
+This is a pit of failure in the sense [Pit of success](Design%20Principles.md#pit-of-success) rules out: the code reads correctly and behaves wrongly, with no diagnostic.
+
+Two levers, not exclusive. A tick-integer timer in the core API makes the modulo form exact, removing the float error that causes the misbehaviour — see [Engine API](Engine%20API.md#timing). A language-level periodic trigger alongside `tick` would remove the accumulator entirely, but has to answer what happens when a period is shorter than a frame, and whether missed periods coalesce or repeat.
 
 ---
 
@@ -388,6 +475,8 @@ Open, and not obviously affordable. Buffering writes is a copy and a commit pass
 **No early-exit form inside `do`** · `pending` · `2`
 
 Unspecified. Interacts with the `where`/`do` boundary above — an early exit is the refactor that silently forfeits acceleration.
+
+Writing against the current spec surfaced two distinct needs that a single keyword should not serve. One is "advance to the next match", which is the early exit proper. The other is an explicit no-op — a way to state that a branch, most often a `match` arm, deliberately does nothing, so that the reader can tell intent from omission. The second is a readability construct with no control-flow effect and could be spelled separately.
 
 **Alternative ternary syntax** · `idea` · `1`
 
@@ -448,6 +537,28 @@ Allowing a manifest to admit a *range* of versions per dependency, with guards (
 Scripts addressing fields through a layout table populated at load, rather than baking static offsets. Would let a type's size or field widths vary per deployment while keeping one portable artifact. Rejected for now on the honest-costing bar: it puts an indirection on every field access to buy configuration flexibility that [Scripts are portable](Design%20Principles.md#scripts-are-portable) says the engine should be absorbing instead.
 
 Related and dropped outright rather than deferred: **two-tier compilation** (mods compiled once and portably, internal modules compiled per target). It resolves the same tension, but by giving up the single-artifact guarantee, and it splits the backend into two paths where the less-tested one is the one shipped to third parties.
+
+---
+
+## Core API
+
+**The core API surface is unspecified** · `pending` · `4`
+
+Scripts already depend on a body of engine-provided types and procedures that no document describes — vector types and their value constants, random number generation, elapsed tick time, geometric predicates, and ordinary math. [Engine API](Engine%20API.md) now holds the boundary and the areas; almost none of the contents are settled.
+
+Distinct from the [host embedding API](#compilation-and-backend), which is about what capabilities the host grants a guest module. The core API is present in every deployment and is not a capability question.
+
+**Timer primitive** · `mechanism` · `3`
+
+Proposed representation, carried over from prior work in another engine: a starting tick number plus a duration in ticks. Fixed size, no indirection, so it passes [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) with no taint and can sit in a component directly.
+
+The property that earns it is that it is read-only until it fires. A countdown timer writes on every tick on every entity holding one, producing sync traffic and change-detection churn on data nobody asked about; a start-plus-duration timer is compared, not mutated.
+
+Integer ticks also remove the float error behind [periodic scheduling](#events-and-change-detection) being wrong when written naively.
+
+One hazard to resolve before adopting it. An absolute start tick is only meaningful against an agreed tick origin. Copied to a peer whose counter differs, it silently yields the wrong deadline — and [Transparent networking](Design%20Principles.md#transparent-networking-and-serialization) promises the author never has to think about that. A countdown survives resync; start-plus-duration does not. The same question applies to a module swapped by hot reload.
+
+Open regardless of representation: whether the authored surface is in seconds and converted at load per [Resolve at compile/load time](Design%20Principles.md#resolve-at-compileload-time), which [Domain over technicism](Design%20Principles.md#domain-over-technicism) argues for, and whether one-shot and repeating are one construct or two.
 
 ---
 

@@ -10,7 +10,7 @@ do
     ember.Position += wind_direction * Engine.tick_time
 
     if ember.Ember.lifetime >= ember_lifetime
-        if let bush = find_overlapping_bush(ember.Position.value)
+        if let bush = find_overlapping_bush(ember.Position.value) | if let not in spec, for failable operations
            bush.Flammable.temperature += ember_land_heat
         end
 
