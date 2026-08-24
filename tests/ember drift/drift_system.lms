@@ -1,0 +1,29 @@
+module ember_drift
+
+const ember_lifetime = 4
+const ember_land_heat = 60
+
+define query drift_embers(Vector2 wind_direction)
+for ember with Position, Ember
+do
+    ember.Ember.lifetime += Engine.tick_time
+    ember.Position += wind_direction * Engine.tick_time
+
+    if ember.Ember.lifetime >= ember_lifetime
+        if let bush = find_overlapping_bush(ember.Position.value)
+           bush.Flammable.temperature += ember_land_heat
+        end
+
+        delete ember
+        skip
+    end
+end
+
+proc find_overlapping_bush(Vector2 position) returns Entity with Flammable | speculative syntax for giving the entity an invariant
+    | TODO
+end
+
+on tick do
+    let wind = get_wind_direction()
+    drift_embers(wind) | passed this as a param to make sure it's called only once. Can this be solved inline?
+end

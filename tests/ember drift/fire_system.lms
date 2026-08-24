@@ -1,0 +1,58 @@
+module ember_drift | Do I really need to write this on each file? Can I get away with no doing it?
+
+define component Flammable requires BurnState ( | requires is not in the spec I know
+    decimal temperature range(0..)
+)
+
+| I'd rather make this a static property of Flammable
+const ignite_point = 100
+const burn_time = 12
+const heat_distance = 1
+const heat_transfer = 10
+const heat_falloff = -6
+const ember_spawn_period = 2
+
+| This enum encodes both state (by value) and burnability (by presence)
+| is this a good thing because it's expressive or a bad thing because it's overloaded?
+define enum BurnState (
+    Unburnt,
+    Burning(decimal time),
+    Burnt
+)
+
+| Ignores bush radius for now
+| The inner query could technically be a count and multiply, but this is a more interesting exercise
+define query update_burning()
+for entity with Position, Flammable, (BurnState.Unburnt or BurnState.Burning)
+do
+    for other with Position, BurnState.Burning
+    where entity != other and in_range(entity.Position.value, nearby.Position.value, heat_distance)
+    do
+        entity.Flammable.temperature += heat_transfer * Engine.tick_time
+    else | inner query failed to produce results
+        entity.Flammable.temperature += heat_falloff * Engine.tick_time
+    end
+
+    if entity.BurnState.Unburnt and entity.Flammable.temperature >= ignite_point
+         entity.BurnState = Burning
+    end
+
+    if entity.BurnState.Burning
+        entity.Burning.time += Engine.tick_time
+
+        if entity.Burning.time >= burn_time
+                entity.BurnState = Burnt
+                skip | pass/break alternative
+        end
+
+        let t = entity.Burning.time
+        let dt = Engine.tick_time
+        let p = 1/ember_rate
+        if floor(t/p) != floor((t-dt)/p) | Ad-hoc timer, can be improved
+            let pos = entity.Position.value
+            create entity with Position(pos), Ember
+        end
+    end
+end
+
+on tick update_burning()

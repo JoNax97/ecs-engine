@@ -1,0 +1,33 @@
+module ember_drift
+
+const speed_range = range(0..5)
+const reroll_range = range(20..40)
+
+| This design showcases a weakness: global wind state is not-networkable since it's outside of ecs
+| but it's the esiest thing a designer will reach for.
+| Need to design singleton/global entities/components or making file state netowrkable
+let Vector2 wind_direction
+let decimal wind_time
+
+define public proc get_wind_direction returns Vector2
+    return wind_direction
+end
+
+define proc new_wind_direction returns Vector2
+    let speed = Random.get_decimal(speed_range)
+    let heading = Random.get_decimal(range(0..tau))
+    return Vector2(sin(heading), cos(heading)) * speed
+end
+
+on load do
+    wind_direction = new_wind_direction()
+    wind_time = Random.get_decimal(reroll_range)
+end
+
+on tick do
+    if wind_time <= 0 | Reroll wind direction when time elapsed
+        wind_direction = new_wind_direction()
+        wind_time = Random.get_decimal(reroll_range)
+    end
+    wind_time -= Engine.tick_time
+end

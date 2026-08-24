@@ -1,0 +1,118 @@
+Components
+    Brush
+        position
+        radius
+        heat (0..)
+
+    Ember
+        position
+
+    Smoke
+        position
+        density (0..)
+
+    Moth Cluster
+        position
+        amount (5..20)
+
+Enums
+    BrushState
+        Unburnt
+        Burning(amount)
+        Burned
+
+
+Constants
+    Ignote Point = 100
+    Burn Time = 12
+
+
+Globals
+    Wind
+        direction
+        duration
+
+
+Operations
+
+    Re-roll wind
+
+    Update fire
+        Produce embers
+        Produce fire
+    Update smoke
+    Update embers
+    Update moths
+
+    ---
+
+    Sample temperature at point
+    Sample air at point
+
+
+range with fallback
+
+imperative:
+
+if entity has others in range:
+    for each in range
+        do stuff
+else
+    do fallback
+
+generalized:
+
+if query has results:
+    iterate query
+else
+    fallback
+
+
+lousy version with quadratic time:
+
+for entity with Position, Flammable
+do
+    let has_nearby = false
+
+    for other with Position, Flammable
+    where entity != other and in_range(...)
+    do
+        has_nearby = true
+        do stuff
+    end
+
+    if not has_nearby
+        fallback
+end
+
+
+better version??
+
+| version 1: actual nested query:
+| pro: cost more obvious
+| con: less optimizable
+for entity with Position, Flammable
+do
+
+    for other with Position, Flammable
+    where entity != other and in_range(...)
+    do
+        do stuff
+    else | inner query failed to produce results
+        fallback
+    end
+end
+
+| version 2: 1 query with per-level do blocks
+| pro: more optimal: 1 scan with more logic points interleaved
+| con: can be more confusing
+for (entity with Position, Flammable)
+    for (other with Position, Flammable) // the second for makes it different than using a comma
+    where entity != other and in_range(...)
+    do | second part, per result
+        do stuff
+    else | second part failed to produce results
+        fallback | entity is bound, other is not
+
+| you could have a do here for the first part irrespective of the second
+end

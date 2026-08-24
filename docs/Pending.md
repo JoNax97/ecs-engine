@@ -146,7 +146,7 @@ Exact form deferred to a dedicated pass. Open within it:
 - Marker for the inferred case. A leading type is already an unambiguous declaration (`integer y = 0`); only inference lacks one. `x := 5` needs no keyword but is punctuation, against [Readable by non-engineers](Design%20Principles.md#readable-by-non-engineers); `var x = 5` reads better but adds a second declaration form beside the type-first one.
 - Type-first (`integer x`) versus name-first (`x: f32`, previous iteration).
 - Whether file-level mutable state exists and takes a distinct keyword. It is game-tier — it survives frames, and hot reload has to decide what happens to it — so making that visible at the declaration is worth considering.
-- Reordering so the name sits between type and annotations (Jose). Possibly already satisfied: `integer ammo range(0..999)` puts it there.
+- Reordering so the name doesn't sit between type and annotations (Jose).
 - Optional fields and the associated bit-packing idea (Jose).
 
 **Procedure overloading — decided, not yet written into the spec** · `pending` · `3`

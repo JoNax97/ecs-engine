@@ -1,0 +1,25 @@
+Design a small vertical slice of a game mechanic, written as a design brief.
+
+CONTEXT
+You are designing a mechanic for a real-time game. A single persistent scene where many independent things act continuously and simultaneously. Pick the genre and mechanic yourself. Make sure the mechanic is standalone and does not interact with other external mechanics of the hypothetical game.
+
+WHAT TO PRODUCE
+A design brief in plain designer language: what exists in the world, how it behaves, what the rules are. Concrete numbers where a number matters (rates, thresholds, ranges, durations).
+
+Write in natural prose, only falling back to tables or lists strictly needed. Write what a game designer would give to programmer for analysis. Do not leave gaps in design.
+
+SHAPE
+- Things affect each other. Mechanics that keeps things isolated are not good enough; interaction is the point.
+- State accumulates, decays and persists and that has an effect on mechanics.
+- Things should react to discrete occurrences, not only to continuous change.
+
+SCOPE
+- Between 3 and 5 distinct kinds of thing in the world.
+- Between 4 and 6 rules of behavior total, prioritizing rules that involve multiple things.
+- 2 or 3 edge cases called out.
+- Arround 400 words.
+
+CONSTRAINTS
+- Do not design an implementation. Do not describe data structures, algorithms, architecture, etc.
+- Focus exclusively on gameplay logic. No input, UI, art, audio, narrative, etc.
+- Do not assume any technology or engine. Do not write any code or pseudocode.

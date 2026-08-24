@@ -1,0 +1,40 @@
+module ember_drift
+
+| Should include a preferred declaration order in the spec?
+| So far, types -> consts -> vars -> procs -> events seems the most natural
+
+define component Position (
+    Vector2 value | Random idea: single field called value can be coerced (so you can use entity.Position instead of entity.Position.value)
+)
+
+define component Bush (
+    decimal radius range(0..)
+)
+
+define component Ember (
+    decimal lifetime
+)
+
+const bush_count = 100
+const map_size = 1000
+const patch_range = range(1..10)
+
+| Probably could use a higher level API to define prefab/template
+| entities. Better if they are parametrizable
+define public proc create_bushes()
+    for i in range(0..bush_count)
+        let x = Random.get_decimal(range(0..map_size))
+        let y = Random.get_decimal(range(0..map_size))
+        let radius = Random.get_decimal(patch_range)
+
+        create entity with
+            Position(Vector2(x, y)),
+            Bush(raduis),
+            Flammable,
+            BurnState.Unburnt
+    end
+end
+
+on load do
+    create_bushes()
+end
