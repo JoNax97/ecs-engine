@@ -16,7 +16,7 @@ Everything known to be unresolved, organized by area. Recording an item here is 
 
 ## Storage and Memory Layout
 
-**Storage model** · `contradiction` · `5`
+### Storage model · `contradiction` · `5`
 
 Undecided, needs its own design pass. The constraints any answer must satisfy are in [Engine Core](Engine%20Core.md#constraints). The two live candidates:
 
@@ -27,29 +27,29 @@ The ownership entry below presumes archetype partitioning, which it has not earn
 
 This is the root blocker for the rest of this section, for `changed` on a non-owning peer, and for handle-validity semantics — whether a handle can be invalidated by an unrelated entity's mutation is a property of the storage model, not of the handle.
 
-**Entity identity and generation** · `pending` · `4`
+### Entity identity and generation · `pending` · `4`
 
 Unspecified. How an entity ID is composed, whether it carries a generation counter, and what a stale ID resolves to. Blocked on the storage model.
 
-**Copy granularity** · `pending` · `3`
+### Copy granularity · `pending` · `3`
 
 Whether the unit of transfer between peers is the memory block, a sub-range, or a single component is unexamined. Interacts directly with the storage decision.
 
-**The synchronization path** · `pending` · `3`
+### The synchronization path · `pending` · `3`
 
 Memory block selection, delta compression and peer topology are unwritten. [Frame Model and Synchronization](Engine%20Core.md#frame-model-and-synchronization) records only the premise the rest of the design leans on: per-frame chunk copies, with a peer either owning entities or receiving them. That premise is what `non_serialized`, bit packing and the flat-copyable rule are all written against.
 
-**Storage for pointer-like component data** · `pending` · `3`
+### Storage for pointer-like component data · `pending` · `3`
 
 ECS-managed buffers — the storage `dynamic` selects — have no design. Related to addressability below.
 
-**Addressability of a `dynamic` component field** · `pending` · `3`
+### Addressability of a `dynamic` component field · `pending` · `3`
 
 The field legality rule itself is now written up — [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) at the engine level, [Storage](Language%20Spec.md#storage) at the language level, [Nested dynamic data in components](#storage-and-memory-layout) for the option it forecloses.
 
 What that write-up does not settle: whether a `dynamic` component field is directly addressable or handle-like. Holding a reference to one across a frame boundary is the case that would bite, which makes this the same question as handle validity below, asked of engine-managed memory rather than of an entity.
 
-**Nested dynamic data in components** · `idea` · `2`
+### Nested dynamic data in components · `idea` · `2`
 
 Option deliberately not taken, recorded because it is a strict superset of the rule above — nothing written under the current rule becomes illegal if this is adopted later.
 
@@ -62,7 +62,7 @@ Two things make it hard:
 
 Blocked on the storage model regardless: "block-relative" presumes archetype storage. Under inverted-bitmap storage entities never move and the per-component arrays are the storage, so there may be no block to be relative to in the same sense.
 
-**Flattened component layout** · `mechanism` · `3`
+### Flattened component layout  · `mechanism` · `3`
 
 Components have a fixed layout, so nested `value` fields resolve to static offsets rather than requiring navigation. Worth stating as its own mechanism because several open items lean on it:
 
@@ -71,7 +71,7 @@ Components have a fixed layout, so nested `value` fields resolve to static offse
 - It settles that `value` nesting costs nothing at run time, which is what makes values a free abstraction rather than a structural choice.
 - The taint mechanism already carries a field path; flattening turns that path into the offset.
 
-**Memory tiers, handle validity, and null/absence semantics** · `pending` · `4`
+### Memory tiers, handle validity, and null/absence semantics · `pending` · `4`
 
 Carried over from an earlier design layer, not yet reconciled with the current constructs.
 
@@ -83,7 +83,7 @@ Null coalescing operator (Jose) depends on absence semantics being settled first
 
 The shape that keeps appearing in practice is a lookup that may fail, immediately bound and used — a conditional binding, where the entity or value is in scope only on the success path. Whatever absence mechanism is chosen has to make that spelling cheap, since it is the common case rather than an edge one.
 
-**Asynchronous operations** · `pending` · `4`
+### Asynchronous operations · `pending` · `4`
 
 Nothing in the current spec addresses operations that do not complete within the frame they were requested — resource and asset loading being the obvious case. Direction from [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#handles--validity): the request returns a handle immediately, and the handle's state enum (`Pending` / `Ready` / `Failed` / `Dead`) is the completion signal. No futures, no callbacks, no suspension — the author polls or matches on state.
 
@@ -93,7 +93,7 @@ What remains a decision is that handle state carries three jobs at once — abse
 
 Depends on the host embedding API, which is unwritten — see [Runtime & Deployment](Runtime%20&%20Deployment.md#not-yet-written).
 
-**Ownership and `non_serialized` have layout consequences** · `pending` · `4`
+### Ownership and `non_serialized` have layout consequences · `pending` · `4`
 
 Both partition storage: a block cannot be blind-copied in a single direction if ownership varies within it, and a non-serialized component cannot share a block with synced data. The engine is expected to organize memory so layout matches these constraints — the same mechanism that will cover streaming/partial loads and interest management.
 
@@ -105,7 +105,7 @@ Mechanism side is tracked in [Language Implementation](Language%20Implementation
 
 ## Systems, Scheduling and Parallelism
 
-**Systems as a first-class construct, and dependency declaration** · `pending` · `5`
+### Systems as a first-class construct, and dependency declaration · `pending` · `5`
 
 System scheduling and dependency declaration are unspecified. Related and unresolved: whether **systems become a first-class construct**. They were previously judged unnecessary — a query bound to a trigger already covers what a system does — but expressing dependencies may require a named, addressable thing to hang them on, and anonymous self-driving queries give nothing to reference. Raised in conversation with a colleague; not previously written down anywhere.
 
@@ -117,7 +117,7 @@ To settle when they are designed: variables stay module-level even if systems be
 
 Still to design: how dependencies are declared, whether ordering within a system is positional or explicit, and whether a system is the thing dependencies attach to or merely a namespace.
 
-**Gating machinery on a global condition** · `pending` · `4`
+### Gating machinery on a global condition · `pending` · `4`
 
 A session-wide condition — PvP enabled, a phase change — engages or disengages a whole set of behaviour. Since [listeners are statically bound](Language%20Spec.md#events), the only way to express this today is to write queries that match nothing while the condition is off. That is inadequate on two counts: it forces the global condition to be denormalized into every affected entity, which is the worst available data layout, and the match still costs something per tick.
 
@@ -129,13 +129,13 @@ Three candidate answers, and they overlap, so at most one should be adopted with
 
 Narrow the problem before choosing. A condition fixed at session start is already fully handled by [load-time conditionals](Language%20Spec.md#load-time-conditionals) at no runtime cost; only conditions that genuinely toggle mid-session justify new machinery, and that set may be small.
 
-**Static access-set extraction** · `pending` · `5`
+### Static access-set extraction · `pending` · `5`
 
 The previous design required explicit per-query read/write declarations, on the grounds that "conflict detection requires declared, not inferred, access sets". The current position is the opposite and is settled: no author-declared access, with the compiler statically extracting per-field read/write sets from imperative bodies.
 
 What remains open is the analysis pass itself — it is what makes parallelism a safe hint rather than an unchecked claim, and it is assumed everywhere and specified nowhere.
 
-**Inferred procedure purity** · `idea` · `3`
+### Inferred procedure purity · `idea` · `3`
 
 A procedure's purity is derived by the compiler from the same analysis that extracts access sets: a proc that writes no ECS data and calls no impure proc is pure. Nothing is declared, so the common case carries no signature noise, which is the cost Verse pays for its `<computes>`/`<reads>`/`<writes>` effect specifiers and the reason its "learnable as a first language" goal is in tension with its own effect system.
 
@@ -143,7 +143,7 @@ An optional annotation would let an author pin the intent, so a proc meant to st
 
 Two use sites motivate it. First, `where` currently guarantees no mutation only by position: the guarantee holds at the clause boundary and evaporates at a call boundary, since nothing in the spec says whether a proc invoked from `where` may write. Purity is the property that closes it. Second, calling a pure proc as a freestanding statement is dead code, and can be rejected the same way [Statements and Expressions](Language%20Spec.md#statements-and-expressions) already rejects a bare expression that discards its result.
 
-**`parallel`** · `idea` · `2`
+### `parallel` keyword · `idea` · `2`
 
 Highly speculative, and it is not the real design — it sits on top of one that does not exist yet.
 
@@ -153,12 +153,12 @@ The intended model is that the engine builds a DAG from declared dependencies pl
 
 ## Data Modeling and Declaration Syntax
 
-**Declaration syntax and semantics** · `pending` · `2`
+### Declaration syntax and semantics · `pending` · `2`
 
 - Reordering so the name doesn't sit between type and annotations (Jose).
 - Optional fields and the associated bit-packing idea (Jose).
 
-**Are bound names reassignable** · `pending` · `3`
+### Are bound names reassignable · `pending` · `3`
 
 Parameters, query bindings and loop variables are bound rather than declared. Whether they can be reassigned is unstated, and needs settling before it is written down.
 
@@ -170,7 +170,9 @@ What blocks a straight "bound names are immutable":
 - It must separate rebinding the name from mutating through it. `target.Health.current += damage` is what query bodies exist to do, so the rule constrains the name and never the data it reaches.
 - The three cases may not want the same answer. Reassigning a value parameter is local and harmless; reassigning a query binding is meaningless, since the next match overwrites it.
 
-**Procedure overloading — decided, not yet written into the spec** · `pending` · `3`
+### Procedure overloading · `pending` · `3`
+
+Decided, not yet written into the spec.
 
 - Procs overload on argument types. Parameter names do not participate, so `damage(amount: integer)` and `damage(percent: integer)` are not a valid overload set.
 - Types and procs cannot share a name; overloading lives inside the proc namespace only. Otherwise `Health(current: 100)` is ambiguous between construction and a call.
@@ -181,7 +183,9 @@ Combined with dot-sugar on the first parameter, overloading covers the plain "on
 
 Open: the syntax doc's rule that a hand-written concrete generic query takes precedence over the autogenerated one is a specialization rule, and needs reconciling with these when generics are designed.
 
-**Expression statements — decided, not yet written into the spec** · `pending` · `2`
+### Expression statements · `pending` · `2`
+
+Decided, not yet written into the spec
 
 An expression statement is legal only when its top-level expression is a call, or a keyword whose effects are known (`create`, `delete`). Bare `Health(current: 100)`, `a + b` and `e.Health` are errors — dead code that looks like it does something.
 
@@ -189,11 +193,13 @@ An expression statement is legal only when its top-level expression is a call, o
 
 The previous iteration barred unbound construction on ownership grounds — the binding governs lifetime, so construction without a destination is invalid. That argument does not apply here, since values are copied and own no memory. Same rule, different justification, and the new one is why the general form is preferable to a construction-specific one.
 
-**Parens carry three roles — accepted** · `pending` · `1`
+### Parens carry three roles · `pending` · `1`
+
+Accepted 
 
 Field lists, construction and calls all use `()`. The previous iteration split them (`{}` for construction, `()` for calls) to avoid ambiguity when a type and a proc share a name. Not adopted: `define` marks declarations, and no overloading across the type and proc namespaces means resolution is unambiguous without a second bracket form. Recorded so the divergence from the previous iteration is deliberate.
 
-**Generics and trait/conformance syntax** · `pending` · `3`
+### Generics and trait/conformance syntax · `pending` · `3`
 
 Sketched in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#generics--traits), never carried forward. Generics resolve by monomorphization, with `<>` holding any compile-time parameter — type parameters and size parameters alike — and no marker needed, since types are never values and no ambiguity exists to guard against.
 
@@ -204,17 +210,17 @@ Two things to reconcile when this is taken up:
 - Proc-backed trait fields break the assumption that field access is a plain read or write, which [static access-set extraction](#systems-scheduling-and-parallelism) and [flattened component layout](#storage-and-memory-layout) both rely on.
 - A hand-written concrete generic query taking precedence over the autogenerated one is a specialization rule, and needs squaring with the overload rules above.
 
-**Components as a single type** · `idea` · `3`
+### Components as a single type · `idea` · `3`
 
 From [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#components--lifetime-tiers): no separate handle type ever appears in the type system. The compiler switches a component's backing between stack bytes and entity storage based on what it can prove, and the author sees one type and one operation set throughout. Assignment always copies; behaviour differs by what is copied, never by a hidden type distinction. Query bindings are live-backed by construction.
 
 Worth evaluating against [Domain over technicism](Design%20Principles.md#domain-over-technicism) — it is the same idea applied to handles. The cost is that whether a write lands on entity data or on a local becomes a fact about provenance rather than about the type, which is exactly the kind of thing [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) is suspicious of.
 
-**Procedure restrictions** · `pending` · `2`
+### Procedure restrictions · `pending` · `2`
 
 [Procedures](Language%20Spec.md#procedures) states there are no lambdas or closures. Three further restrictions from the previous iteration are unstated: procedures cannot be stored in components, cannot be held in persistent state, and cannot be used as callbacks. Also unstated is dot-sugar on the first parameter — `effect.get_magnitude()` for `get_magnitude(effect)` — which the overload rules above assume exists.
 
-**`where` clause on a procedure** · `idea` · `3`
+### `where` clause on procs · `idea` · `3`
 
 A side-effect-free clause at the head of a proc, stating the domain its parameters must satisfy. Semantics are contract failure in every context — never filtering. What varies is the response: a direct call that violates the contract is an error, while an event dispatch that violates it is silently skipped, because skipping is what an event's error response already is. The filter-like behaviour is therefore a consequence of the dispatch context, not a second meaning of the clause.
 
@@ -230,11 +236,11 @@ Open: purity, which waits on [Inferred procedure purity](#systems-scheduling-and
 
 Note the breadth pressure. This would be the third `where`-shaped construct alongside the query clause and the proposed [guard clause](#systems-scheduling-and-parallelism). Reusing syntax across contexts is a stated principle, but three contexts with three cost models is how a keyword stops carrying meaning.
 
-**`requires` on components** · `mechanism` · `2`
+### `requires` on components · `mechanism` · `2`
 
 An alternative to inheritance: a component declares a dependency on another. Cascade-removal reuses the existing end-of-frame flush pass, the same mechanism as relationship deletion — reuse, not new machinery. No syntax, no semantics for conflicts or diamond cases.
 
-**Bit packing** · `idea` · `2`
+### Bit packing · `idea` · `2`
 
 Three directions to explore, not necessarily together:
 
@@ -244,15 +250,15 @@ Three directions to explore, not necessarily together:
 
 Runs into the alignment rule in [Numeric Representation](Language%20Implementation.md#numeric-representation): numbers are byte-aligned, trading storage efficiency for direct addressability. Packed fields are not directly addressable, so any of these needs a story for how a packed field is read, written and named in an access set. Jose's optional-fields proposal in the declaration syntax pass carries the same idea from a different direction.
 
-**Tuples** · `pending` · `3`
+### Tuples · `pending` · `3`
 
 [Tuples](Language%20Spec.md#tuples) exist only as the return type of a multi-value proc. Whether they are a general type — declarable, storable in a component, bindable — is unspecified. A storable tuple would need a position under the flat-copyable rule.
 
-**Value constants** · `pending` · `2`
+### Value constants · `pending` · `2`
 
 Values like `Vector3.left`. Used in [LoomScript Examples](LoomScript%20Examples.md), unspecified in the language.
 
-**Enum payload access outside `match`** · `pending` · `4`
+### Enum payload access outside `match` · `pending` · `4`
 
 [Enums](Language%20Spec.md#enums) define variants that may carry payloads, but the only described way to reach a payload is a `match` arm binding. Writing an enum-valued component in imperative code produced three inconsistent spellings in the same body — the variant as a structural term in a `for` clause, the variant as a boolean predicate on a bound entity, and the variant used as if it were a component in order to reach its payload field. Only the first is specified.
 
@@ -260,15 +266,15 @@ Also unresolved: assigning a payload-carrying variant without supplying its payl
 
 Related: whether a variant should be readable as a predicate at all, given that presence-style tests already exist for components.
 
-**Component single-field coercion** · `idea` · `2`
+### Component single-field coercion · `idea` · `2`
 
 A component whose only field is named `value` could be readable as that field directly — `entity.Position` rather than `entity.Position.value`. Removes the most repeated noise in practice, since single-field wrapper components are the common case. Cost is a second access form for one shape of declaration, and an ambiguity wherever the component itself is the intended operand.
 
-**Entity type carrying a component invariant** · `idea` · `2`
+### Entity type carrying a component invariant · `idea` · `2`
 
 A proc returning `Entity` says nothing about what that entity has, so every caller re-checks. A return type of the form "entity known to have these components" would let the check happen once, at the boundary. Interacts with absence semantics, since such a proc usually also has to express "found nothing".
 
-**Which division is the default** · `pending` · `3`
+### Which division is the default · `pending` · `3`
 
 `/` on two integers currently truncates, following the `f = 0` case of [unified representation](Language%20Implementation.md#unified-representation). The alternative is for `/` to always mean real division, with truncating division given a separate spelling.
 
@@ -278,7 +284,7 @@ To be explored from the end user's perspective rather than the implementation's:
 
 ## Queries and Predicates
 
-**The documented `with`/`where` boundary is not the one that costs** · `discrepancy` · `4`
+### The documented `with`/`where` boundary is not the one that costs · `discrepancy` · `4`
 
 [Clauses](Language%20Spec.md#clauses) presents the split in cost terms (fixed presence/bitmap check vs. per-entity runtime evaluation) and then disclaims that it constrains the compiler at all. Both are correct under the intended model: `with` and `where` together form one declarative matching region the compiler may reorder and optimize freely — for instance, servicing a `distance(...)` predicate from a spatial partition rather than per entity. `do` is a freeform imperative block and is largely opaque to that optimization.
 
@@ -288,42 +294,35 @@ A second cost cliff sits inside `where`. If acceleration depends on the compiler
 
 Spatial partitioning for `distance(...)` is a candidate to evaluate against [No general indexing or materialization](Design%20Principles.md#no-general-indexing-or-materialization), not a violation of it.
 
-** Reductions ** 
+### Reductions · `discrepancy` · `4`
 
 Reductions have been pulled from the spec for now, they need further work.
 
 Putting the entire text here for reference: 
 
-### Reductions
-
- Reductions are special kinds of queries that produce a single value instead of iterating over all results imperatively.
- A query ending by a reducer instead of a `do` block becomes a value-producing queries usable anywhere a value is expected:
- 
-```
-define query count_dead_units 
-for unit with Unit, without Alive
-count unit
-
-var dead = count_dead_units()
-```
- 
-`count` and structural/relationship-cardinality reductions cost no
-additional scan. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting
-every matching entity and cost the same as an equivalent hand-written
+> Reductions are special kinds of queries that produce a single value instead of iterating over all results imperatively. A query ending by a reducer instead of a `do` block becomes a value-producing queries usable anywhere a value is expected:
+>
+> ```
+> define query count_dead_units 
+> for unit with Unit, without Alive
+> count unit
+>
+> var dead = count_dead_units()
+> ```
+> 
+> `count` and structural/relationship-cardinality reductions cost no additional scan. `sum`/`avg` over a field, and `max_by`/`min_by`, require visiting every matching entity and cost the same as an equivalent hand-written
 scan — the language does not disguise this cost as free.
- 
-There is no general materialized or orderable result-set type. Grouping,
-sorting, and top-N selection are intentionally outside the query language;
-where needed, they are written as ordinary iteration inside a `proc`.
- 
+> 
+> There is no general materialized or orderable result-set type. Grouping, sorting, and top-N selection are intentionally outside the query language; where needed, they are written as ordinary iteration inside a `proc`.
 
-**Incrementally maintained reductions** · `pending` · `2`
+
+### Incrementally maintained reductions · `pending` · `2`
 
 Whether `sum`/`count` reductions over a live query can be maintained incrementally (updated on write rather than rescanned on read) — would require exposing the prior value on a `changed` event, which is not yet designed. Mechanism sketched: hook the existing dirty-bitmap/version-per-block change detection and update a running accumulator on write, rather than building new infrastructure.
 
 Deferred rather than solved: access to previous values is a requirement on the ECS design itself, and belongs in the requirement list gathered when that design happens, not here.
 
-**Query amortization and update rates** · `pending` · `3`
+### Query amortization and update rates · `pending` · `3`
 
 Budgeted "process N per tick, resume next tick where it left off" work. Reasoning from [Previous Iteration](Previous%20Iteration.md), never carried forward: true coroutines are disallowed, since suspending mid-iteration holds call-stack state across a frame boundary and violates the tier rules. The replacement is a resumable cursor — position and accumulator stored as game-tier state, each resume starting a fresh call-stack scope.
 
@@ -331,11 +330,11 @@ Staggered update rates (e.g. distant entities every other frame) are treated sep
 
 No syntax for either. Open whether the cursor is author-visible state or a query-level annotation.
 
-**GroupBy** · `shelved`
+### GroupBy · `shelved`
 
 Ruled out of the query language, but worth recording why the ruling might not hold. The objection that killed it was that materialized results reopen the heap-in-component hazard — and that objection does not apply if the result is scoped to frame-tier memory: bump-allocated, discarded at frame end, never touching a component. A transient, non-addressable GroupBy is therefore technically safe. It was rejected on the honest-costing bar instead — it did not clearly earn its cost — which is a design-taste call, not an architectural blocker. Revisit if a real use case appears.
 
-**Empty-match fallback, and outer/inner asymmetry in a `for` clause** · `pending` · `4`
+### Empty-match fallback, and asymmetry in `for` clauses · `pending` · `4`
 
 A recurring shape has no spelling: run a body per match, and run something else once when an entity matched nothing. Written today it needs a manual flag variable set inside the inner iteration and tested after it, which is noise, and it is easy to get wrong — applying per-non-match what was meant to apply once.
 
@@ -352,27 +351,27 @@ Whichever is chosen, binding order becomes semantically significant and the comp
 
 ## Relationships
 
-**Payload storage on symmetric relationships** · `pending` · `3`
+### Payload storage on symmetric relationships · `pending` · `3`
 
 Storage location for payload data on symmetric or many-to-many relationships, which have no single owning side.
 
-**Quantified negation over a relationship or sub-match** · `pending` · `3`
+### Quantified negation over a relationship or sub-match · `pending` · `3`
 
 "No entity related to this one satisfies X" — identified as a real gap, no syntax chosen.
 
-**Transitive traversal** · `mechanism` · `3`
+### Transitive traversal · `mechanism` · `3`
 
 Needs a real graph walk, and is the one query construct whose cost is genuinely runtime-dependent rather than bounded by the match set. No depth bound decided; see [bounded execution](#errors-and-control-flow). Listed as a TODO in the spec's [Relationships](Language%20Spec.md#relationships) section.
 
-**Ephemeral and exclusive relationships** · `pending` · `2`
+### Ephemeral and exclusive relationships · `pending` · `2`
 
 Listed as a TODO in the spec's [Relationships](Language%20Spec.md#relationships) section, undesigned.
 
-**Direct iteration over a bound relationship's targets** · `pending` · `2`
+### Direct iteration over a bound relationship's targets · `pending` · `2`
 
 Syntax for iterating a relationship outside a query (e.g. given a held `Entity`, iterating its `Children`) — sketched as reusing the existing `for ... in` loop form, not finalized.
 
-**Wildcard / `any` relationship terms** · `mechanism` · `2`
+### Wildcard / `any` relationship terms · `mechanism` · `2`
 
 Compile to presence-only bitmap checks with no target materialization — the cheapest possible form, and a distinct codegen path from the named-target case. Named-target terms compile to forward relationship lookups, O(1) per match: a direct index or pointer chase on the source entity's relationship data, not a general join algorithm. Named targets that are never used can be optimized away by static analysis.
 
@@ -380,21 +379,21 @@ Compile to presence-only bitmap checks with no target materialization — the ch
 
 ## Events and Change Detection
 
-**Change-tracking surface** · `pending` · `4`
+### Change-tracking surface · `pending` · `4`
 
 [Change Tracking](Language%20Spec.md#change-tracking) states only that `changed(Component)` fires on the frame a matching component's value changes. Unspecified: granularity (component or field), what counts as a change when a write stores the same value, how it interacts with `with changed` in a `for` clause, and when the flag is cleared relative to system order.
 
-**Custom event declaration** · `pending` · `4`
+### Custom event declaration · `pending` · `4`
 
 Declaration syntax for custom, game-level events (e.g. `player_joined`) beyond the built-in `tick` / `changed` / `load` triggers. Binding a parameterized event to a query/proc without the trigger's parameter colliding with a `with`-bound name (e.g. `on dead(unit)` alongside a `with`-bound `unit`) is parked pending this.
 
-**`changed(Component)` has no defined meaning on a non-owning peer** · `discrepancy` · `4`
+### `changed(Component)` has no defined meaning on a non-owning peer · `discrepancy` · `4`
 
 Remote state arrives as a raw chunk write rather than a script-initiated mutation. If the engine diffs received chunks and fires `changed`, that is a recurring per-frame cost, against the no-implicit-costs principle. If it does not fire, reactive gameplay code behaves differently on owning and remote peers, which is precisely the networking awareness the design aims to remove. Unresolved; the language cannot stay silent, as `changed` is author-visible.
 
 Mechanism side is tracked in [Language Implementation](Language%20Implementation.md#not-yet-written).
 
-**Single-use dynamic listeners** · `shelved`
+### Single-use dynamic listeners · `shelved`
 
 Proposed form: `on <event> do once ... end`, written inside a proc or query body, registering a listener that fires at most once. The motivating case is a second-order effect expressed next to its cause — marking an entity and stating the reaction to a later event in the same place, rather than in a distant query.
 
@@ -404,7 +403,7 @@ What it was reaching for is already expressible: adding a marker component *is* 
 
 Worth revisiting only in the restricted form where capture is limited to a single entity binding. The captured environment is then exactly a marker component, and the construct becomes a static transform rather than a runtime registration. Open even then: what the generated component is called, whether it is author-visible, and whether the saved locality is worth a construct at all.
 
-**Deferred execution within a frame** · `idea` · `2`
+### Deferred execution within a frame · `idea` · `2`
 
 Separated out of the entry above because it is not a listener. The case is "run this once, later" — deferring expensive cleanup past the current point of execution — with nothing captured.
 
@@ -414,7 +413,7 @@ Open: whether the resume point is the next tick or a defined point within the cu
 
 Note the overlap with existing machinery. For an entity, deferral is already expressible as a marker component plus a static query. The capture-free case needs a construct only because there is no entity to hold the marker — the same hole as file-level mutable state in [Declaration syntax pass](#data-modeling-and-declaration-syntax). Settle that first; a singleton store may leave this with no remaining job.
 
-**Periodic scheduling has no construct, and the obvious spelling is wrong** · `pending` · `4`
+### Periodic scheduling has no construct, and the obvious spelling is wrong · `pending` · `4`
 
 "Do this every N seconds" is ubiquitous in gameplay code and has no support. Written by hand it becomes an accumulator compared against a period, and the natural spelling — a modulo of the accumulated time against the period — is silently wrong: it is true on nearly every tick rather than once per period. Getting it right requires an explicit crossing test against the previous tick's value, which is neither obvious nor discoverable.
 
@@ -426,13 +425,13 @@ Two levers, not exclusive. A tick-integer timer in the core API makes the modulo
 
 ## Errors and Control Flow
 
-**Bounded execution** · `contradiction` · `3`
+### Bounded execution · `contradiction` · `3`
 
 Unreconciled, and newly reopened. The previous design flagged loop and recursion limits for determinism as needed but undesigned, noting there is no GC pause to blame instead. Transitive relationship traversal is the first construct with genuinely runtime-dependent cost and has no max-depth safeguard, which makes the gap concrete rather than theoretical.
 
 [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#error-handling) does answer it, and cheaply: a simple runtime execution cap that halts on exceeding it, with no proof-of-termination requirement and no annotations. Worth adopting or rejecting explicitly rather than leaving the gap open.
 
-**Halt unwind granularity** · `pending` · `3`
+### Halt unwind granularity · `pending` · `3`
 
 [Error Handling](Language%20Spec.md#error-handling) says `fail` halts script execution, but not how far the halt travels. The previous iteration specified it precisely: a halt unwinds to the nearest engine-called entry point. A tick function aborts the whole tick; a query callback aborts only that entity's iteration and the rest continue; a cursor resume aborts only that resume.
 
@@ -442,11 +441,11 @@ The previous iteration kept the boundary unambiguous by forbidding a query from 
 
 Naming: the previous iteration used `halt` rather than `fail`, on the grounds that it communicates only the current entry point stopping. The current spec uses `fail`.
 
-**Error propagation and catching** · `idea` · `2`
+### Error propagation and catching · `idea` · `2`
 
 The spec has `fail` and `assert` ([Error Handling](Language%20Spec.md#error-handling)); propagation and recovery are unspecified. Proposed (Jose): proc calls automatically propagate failures upwards, with some keyword to catch them. Must be weighed against [Fail fast, keep the engine resilient](Design%20Principles.md#fail-fast-keep-the-engine-resilient).
 
-**Intrinsic fallibility** · `idea` · `4`
+### Intrinsic fallibility · `idea` · `4`
 
 An alternative to the entry above, and a generalization of it. Failure becomes a property of an expression rather than a construct layered on top of calls. An operation the compiler knows can fail — component access on an entity that may not have it, index out of bounds, division or modulo by zero, a dead handle, a relationship with no target, a value outside a declared range, a narrowing coercion — is *fallible*, and a fallible expression only type-checks inside a context that handles failure. `if` is that context; there is no catch keyword and no new syntax. The feature is subtraction.
 
@@ -460,7 +459,7 @@ It also collapses `has`. A fallible expression in `where` means the entity is fi
 
 Costs. Range arithmetic becomes load-bearing type checking rather than metadata — interval propagation through the arithmetic operators, decidable at the load boundary, and specified, since an equivalent-but-unrecognized range expression degrading to fallible is the same cost cliff as the `where` predicate-shape problem above. An infallible escape is needed where refinement cannot prove safety — saturating or wrapping operators, explicit at the call site, with fallible as the default. Viability is entirely a function of how strong the range analysis is: with weak refinement, guards proliferate and [Readable by non-engineers](Design%20Principles.md#readable-by-non-engineers) is lost, so this is not adoptable independently of that analysis. Runtime cost is a branch the author wrote, with no unwinding machinery, which suits the AOT and interpreter targets. Still to decide: that nothing binds on failure, including multi-return tuples; and the interaction with **Implicit transactional mutation** below, since a fallible proc that wrote before failing leaves partial mutation unless the write buffer is scoped to the fallible call.
 
-**Implicit transactional mutation** · `idea` · `3`
+### Implicit transactional mutation · `idea` · `3`
 
 Raised as a counterpart to Verse's `<transacts>` rollback, but arrived at from the opposite direction: Verse needs an author-declared effect and a general transactional memory, whereas the compiler here already sees every write to ECS data (see [Static access-set extraction](#systems-scheduling-and-parallelism)). If every mutation in a scope is known statically, the scope's writes can be buffered and applied atomically on successful exit, with structural changes deferred to a frame boundary.
 
@@ -468,13 +467,13 @@ Two properties would follow. A halt would leave no partially mutated world, whic
 
 Open, and not obviously affordable. Buffering writes is a copy and a commit pass that the author did not ask for, which is exactly the shape [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) forbids, so the analysis has to establish that the buffer is bounded and statically sized before this can be considered. Also unresolved: whether the transactional scope is the query body, one entity's iteration, or the trigger; and whether reads within a scope observe its own uncommitted writes.
 
-**No early-exit form inside `do`** · `pending` · `2`
+### No early-exit form inside `do` · `pending` · `2`
 
 Unspecified. Interacts with the `where`/`do` boundary above — an early exit is the refactor that silently forfeits acceleration.
 
 Writing against the current spec surfaced two distinct needs that a single keyword should not serve. One is "advance to the next match", which is the early exit proper. The other is an explicit no-op — a way to state that a branch, most often a `match` arm, deliberately does nothing, so that the reader can tell intent from omission. The second is a readability construct with no control-flow effect and could be spelled separately.
 
-**Alternative ternary syntax** · `idea` · `1`
+### Alternative ternary syntax · `idea` · `1`
 
 With the condition first (Jose).
 
@@ -482,35 +481,35 @@ With the condition first (Jose).
 
 ## Compilation and Backend
 
-**Width-specialized computation** · `idea` · `2`
+### Width-specialized computation · `idea` · `2`
 
 [Computation](Language%20Implementation.md#computation) expands operands to 64 bits. Generating variants of math primitives and procs against the widths actually used would cut that, but it is exclusively a performance improvement — the naive path must be correct on its own.
 
-**Host embedding API** · `pending` · `5`
+### Host embedding API · `pending` · `5`
 
 What the engine exposes to guest modules and how capabilities are granted is unwritten. Blocks [asynchronous operations](#storage-and-memory-layout) and the whole I/O surface below.
 
-**Reload semantics for live state** · `pending` · `4`
+### Reload semantics for live state · `pending` · `4`
 
 [Hot reload](Runtime%20&%20Deployment.md#hot-reload) swaps a module's Wasm object, but what happens to entities and component data whose defining module is being swapped is undefined.
 
 File-level variables are [Unmanaged](Engine%20Core.md#memory-tiers) and so are discarded by the swap, coming back zero-initialized. Whether that self-heals depends on an unsettled question: does `load` re-fire on reload? Least surprise says yes, and a table populated in `on load` needs it to, or it stays zero forever. But on the second firing the world already holds the entities the first firing created, so re-firing duplicates them unless this entry says what happens to them. The two halves have to be answered together.
 
-**Observable agreement between backends** · `pending` · `3`
+### Observable agreement between backends · `pending` · `3`
 
 Whether AOT and interpreted backends must agree observably — execution bounds, numeric edge cases — or may differ. Fixed-point arithmetic removes most of the float divergence risk, but bounded execution (see [Errors and Control Flow](#errors-and-control-flow)) is decided per backend unless this is pinned.
 
-**I/O surface** · `pending` · `3`
+### I/O surface · `pending` · `3`
 
 Input, audio, asset loading, save files, network transport. Not excluded by the design, simply unspecified as host-exposed capabilities. Blocked on the host embedding API.
 
-**Load-time branch elimination is an optimization, not a guarantee** · `discrepancy` · `2`
+### Load-time branch elimination is an optimization, not a guarantee · `discrepancy` · `2`
 
 Deliberate — evaluating the condition at run time is equally correct, so promising elimination would over-constrain the backend. But it leaves an author with no language-level assurance that a branch behind an absent module costs nothing, which is the shape of implicit cost [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) rules out.
 
 Resolution direction: tooling rather than spec — surface what was stripped and what survived, per [Show the machinery in motion](Design%20Principles.md#show-the-machinery-in-motion). A guarantee stated in the language would buy the same confidence at the cost of pinning the backend.
 
-**Const-eval of pure procedures** · `idea` · `2`
+### Const-eval of pure procedures · `idea` · `2`
 
 [Constants](Language%20Spec.md#constants) binds a name to an expression built from literals and other constants, so any value that needs computation cannot be a constant and has to be hand-computed into a magic number. Verse's "just one language" principle is the opposite position — the same constructs run at compile time and run time — and the cheap version of it applies here: once purity is inferred ([Inferred procedure purity](#systems-scheduling-and-parallelism)), a pure proc called with constant arguments is itself a constant, and the load-time evaluator needed for load-time conditionals already exists. Derived constants — lookup tables, precomputed curves, a size from a formula — become expressible without a separate mechanism.
 
@@ -518,19 +517,19 @@ Same inference-plus-optional-annotation shape as purity. Const-eval is implicit 
 
 Open: interaction with the existing rule that constants depending on a load-time conditional cannot determine data layout, since a const-eval'd proc widens what can reach an array bound or range annotation; and termination, since a const-eval'd call must complete at the load boundary, which ties it to **Bounded execution** above.
 
-**Bundled source produces private types** · `pending`
+### Bundled source produces private types · `pending`
 
 From the previous iteration: sharing source between modules by local bundling, without registering a module, yields a distinct private type per bundler — by design, not as a defect. Sharing a real type requires a proper module dependency. Unstated in [Program Structure](Language%20Spec.md#program-structure), and the kind of rule that is discovered the hard way if left implicit.
 
-**Load-time codegen** · `shelved`
+### Load-time codegen · `shelved`
 
 Folding load-time-known values into native code during the Wasm-to-native step at load, rather than emitting indirection for them. Would make any load-time-resolved constant free at run time instead of costing a lookup. Not needed while the only load-time fact is module presence, since a presence check is a branch rather than a value feeding computation. Becomes relevant the moment a load-time value participates in layout.
 
-**Load-time checking of dependency versions** · `shelved`
+### Load-time checking of dependency versions · `shelved`
 
 Allowing a manifest to admit a *range* of versions per dependency, with guards (`module.version >= 2`) selecting between implementations. The rule that makes it sound: unguarded code type-checks against the range's **floor**, and guards narrow only *upward*. Writes check against the floor, reads against the ceiling, so both stay statically decidable without enumerating configurations. Deferred because a single declared version per dependency removes the problem entirely, and version skew is a mod-ecosystem concern that will be designed better against real modules than in the abstract.
 
-**Virtualized data layouts** · `shelved`
+### Virtualized data layouts · `shelved`
 
 Scripts addressing fields through a layout table populated at load, rather than baking static offsets. Would let a type's size or field widths vary per deployment while keeping one portable artifact. Rejected for now on the honest-costing bar: it puts an indirection on every field access to buy configuration flexibility that [Scripts are portable](Design%20Principles.md#scripts-are-portable) says the engine should be absorbing instead.
 
@@ -540,13 +539,13 @@ Related and dropped outright rather than deferred: **two-tier compilation** (mod
 
 ## Core API
 
-**The core API surface is unspecified** · `pending` · `4`
+### The core API surface is unspecified · `pending` · `4`
 
 Scripts already depend on a body of engine-provided types and procedures that no document describes — vector types and their value constants, random number generation, elapsed tick time, geometric predicates, and ordinary math. [Engine API](Engine%20API.md) now holds the boundary and the areas; almost none of the contents are settled.
 
 Distinct from the [host embedding API](#compilation-and-backend), which is about what capabilities the host grants a guest module. The core API is present in every deployment and is not a capability question.
 
-**Timer primitive** · `mechanism` · `3`
+### Timer primitive · `mechanism` · `3`
 
 Proposed representation, carried over from prior work in another engine: a starting tick number plus a duration in ticks. Fixed size, no indirection, so it passes [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) with no taint and can sit in a component directly.
 
@@ -562,7 +561,7 @@ Open regardless of representation: whether the authored surface is in seconds an
 
 ## Spec Consistency
 
-**`LoomScript Examples.md` and the spec disagree** · `contradiction` · `2`
+### `LoomScript Examples.md` and the spec disagree · `contradiction` · `2`
 
 Examples now follow the spec. Most of the earlier list turned out to be spec lag rather than aspirational syntax: parentheses are optional wherever a construct reads unambiguously without them, so the examples were already idiomatic and the spec was missing the rule. Component access casing was the one real fix.
 
@@ -570,7 +569,7 @@ Still divergent, because the spec has no position to sync to:
 
 - `Vector3.left` — see [value constants](#data-modeling-and-declaration-syntax).
 
-**Range violation: which build halts where** · `pending` · `3`
+### Range violation: which build halts where · `pending` · `3`
 
 Settled and written into [Ranges](Language%20Spec.md#ranges): never wrap, halt on out-of-range writes, clamp only via explicit syntax. What is not settled is which range is enforced in which build:
 
