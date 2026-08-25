@@ -20,8 +20,23 @@ Comments are single line and start with a pipe character `|`. Comments have no c
 
 ### Statements and Expressions
 
-Statements are newline-terminated with no semicolons.
-Pure expressions must be part of a statement. A bare expression that discards its result is an error.
+A statement is a construct that performs an action. Statements are newline-terminated with no semicolons, and form the body of every block. Statements are standalone and cannot be used as operands.
+
+An expression is a construct that produces a value. Expressions must always be part of a statement or another expression; they cannot be standalone.
+
+Procedure calls can be both. Procedures without side effects (also known as 'pure functions') cannot be used as statements; their result must be used, or explicitly discarded with `_ =`.
+
+```
+| Valid
+damage = weapon.base * multiplier      | Multiplication expression, part of an assignment statement
+apply_damage(target, damage)           | Procedure with side effects, valid as a standalone statement
+_ = lerp(a, b, 0.5)                    | Pure procedure, part of a discard statement
+
+| Invalid
+weapon.base * multiplier               | Multiplication expression cannot stand alone
+e.Health                               | Field access expression cannot stand alone
+lerp(a, b, 0.5)                        | Pure procedure with result unused
+```
 
 ### Identifiers
 
@@ -497,7 +512,6 @@ define proc lerp(decimal a, decimal b, decimal t) returns decimal
     return a + (b - a) * t
 end
 
-
 | usage
 let f = lerp(a, b, 0.5)
 ```
@@ -513,18 +527,38 @@ end
 let div, mod = divmod(10, 3)
 ```
 
-Parentheses at the call site are for grouping arguments. They may be omitted if the call passes a single argument and it's called as a statement (not nested inside a larger expression).
+Parentheses at the call site are for grouping arguments. They may be omitted when the call is a statement and passes zero or one argument. A paren-less argument extends to the end of the statement and is parsed as a single expression. 
 
-A paren-less argument extends over a complete expression.
+In argument position, a bare procedure name is a reference to the procedure itself.
 
 ```
-print "Hello world"
+| Valid
+test_and_halt        | zero-argument call as a statement
 print 10 + 5         | equivalent to print(10 + 5)
-print pow2(100)      | valid
-print(pow2 100)      | invalid — inner call is nested, needs its own parens
+print get_score()    | the argument is a call expression
+print pow2(100)      | statement witout parens, expression with parens
+
+| Invalid
+print(pow2 100)      | inner call is nested, needs its own parens
+print get_score      | a bare name in argument position is a reference; print exptects a value
 ```
 
-Procedures may share a name as long as the type and/or amount of arguments differ. When disambiguating procedure calls, the one with the least amount of coercion is selected. 
+> [!TIP]
+> There are no lambdas or closures in LoomScript. Procedures are statically resolved, free-standing, and referenced by name only. 
+
+### Procedure Overloading
+
+Procedures may be overloaded, giving one operation a single name across the inputs it accepts. Overloaded procedures share an identifier, and accept different types and/or amounts of arguments. Procedures' return types, parameter names and constraints are not considered for overloading.
+
+```
+define proc damage(Entity target, integer amount) ...
+
+define proc damage(Entity target, decimal fraction) ...
+
+define proc damage(Entity target, integer amount, DamageType kind) ...
+```
+
+When calling an overloaded procedure, the one requiring the least coercion is selected.
 
 ```
 define proc foo(integer a, integer b) ...
@@ -534,8 +568,28 @@ define proc foo(integer a, decimal b) ...
 foo(2, 3)  | Chooses the first declaration since it better matches the arguments
 ```
 
-> [!TIP]
-> There are no lambdas or closures in LoomScript. Procedures are named, free-standing, and referenced by name only. 
+### Signatures
+
+A signature declares a named parameter list and return type, so that a procedure can be passed to another procedure.
+
+```
+define signature ItemComparison(Item a, Item b) returns boolean
+
+define proc sort(Item items[], ItemComparison before)
+    ...
+end
+
+define proc by_weight(Item a, Item b) returns boolean
+    return a.weight < b.weight
+end
+
+| usage
+sort(inventory, by_weight)
+```
+
+The argument must be a named procedure or a parameter of a matching signature, resolvable at compile time. If the proedure is overloaded, the least-coercion rule applies. Parameter names in a signature are documentation only; matching is by type and order.
+
+Signatures may only be used as parameter types. Procedures cannot be stored; therefore a signature cannot be the type of a variable, field, variable, or return value.
 
 ---
 

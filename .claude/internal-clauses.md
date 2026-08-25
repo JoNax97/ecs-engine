@@ -90,11 +90,52 @@ Living artifact. Read it before any design task, and update it in the same pass 
 **Casing convention** (`#identifiers`)
 - Component access keeps the type's own casing <- it is the same symbol written in `with Health`, `create Entity with Health(...)` and `if e has Health`; lowercasing it only in access position would make one symbol change case by context.
 - It also marks where the cost is: component access is a keyed lookup that can miss and halt, while field access is a static offset under `Engine Core.md#component-flattening`.
-- Advisory, not compiler-enforced. Casing does not prevent collisions; what does is that a proc may not take a type's name (`Pending.md#data-modeling-and-declaration-syntax`, procedure overloading).
+- Advisory, not compiler-enforced. Casing does not prevent collisions; what does is that a proc may not take a type's name (`#procedure-overloading`).
 
 **ASCII identifiers** (`#identifiers`)
 - <- Cost avoidance, not semantics. Unicode identifiers require NFC normalization and confusability handling — otherwise `é` as one codepoint and `e` plus a combining accent are different names that render identically, and Latin `a` and Cyrillic `а` are indistinguishable on screen. That is machinery bought to fix a problem that declining Unicode does not have.
 - Does *not* rest on the casing convention. A caseless script (CJK, Arabic, Hebrew) cannot express the PascalCase/snake_case split, but since casing is advisory that argument only ever reached style, never validity.
+
+**One bracket form for three roles** (`#basic-syntax`)
+- Field lists, construction and calls all use `()`. The previous iteration split them — `{}` for construction, `()` for calls — to avoid ambiguity when a type and a proc share a name.
+- Not carried <- `define` marks declarations, and no overloading across the type and proc namespaces, so resolution is unambiguous without a second bracket form. Reverse either premise and the split has to come back.
+- Divergence from the previous iteration is deliberate, not an oversight.
+
+**No dot-call syntax** (`Pending.md#data-modeling-and-declaration-syntax`, dot-sugar shelved)
+- -> `.` means exactly one thing: reaching into data. A reader never has to ask whether a dotted name invokes something.
+- -> The casing convention stays advisory. Dot-sugar on an entity would have needed a lookup order between component types and procedures, or would have made casing compiler-enforced.
+- Does *not* weaken the traits argument: overloading alone covers "one name, many types" (`Language Spec.md#procedure-overloading`). Dot-sugar was ergonomics, never load-bearing for it.
+- Cost: nested calls read inside-out. If that becomes a real pressure the answer is a threading construct, not dot-sugar, so `.` keeps its single meaning.
+
+**Signatures** (`#signatures`)
+- The rule is *a procedure reference must be derivable from source, not from data* — not "procedures are not values". The value framing bans comparators and sorting, which are legitimate; the source-derivability framing bans exactly the storage cases.
+- <- Static access-set extraction (`Engine Core.md#scheduling-and-execution`). A statically resolved reference propagates the callee's access set into the caller's exactly. A reference read from data makes the callee underivable; a conservative union over every proc ever assigned into the slot is decidable but pessimistic, and the pessimism is invisible at the call site — which `Design Principles.md#no-hidden-control-flow-no-implicit-costs` rules out.
+- No anonymous proc literals <- with no literal there is no argument position to nest one call inside another's, so callback pyramids are unspellable rather than discouraged. Also keeps the call site naming intent (`by_weight`) instead of showing mechanism.
+- Anonymous *listener* blocks are not a counterexample: top-level only, no capture, statically bound, cannot be registered or removed. An unnamed declaration, not a value.
+- No stack-level binding of a signature parameter either. A local `let chosen = a if condition else b` stays source-derivable, but it is the point where propagation degrades from exact to a union and the call stops inlining to one direct callee. Dropped for simplicity; an `if` expresses the same thing.
+- Separate `define signature` rather than Pascal-style inline (`proc before(Item a, Item b) returns boolean` in the parameter list) <- the inline form is legible but dense for a non-expert reader. Cost accepted: one extra declaration per signature.
+- The word `signature`, not `delegate` <- C# delegates are storable in fields, multicast and rebindable at run time, all of which this refuses. Prior art with matching semantics has no keyword at all (Algol 60 formal procedures, standard Pascal procedural parameters, Rust `impl Fn`, C++ template comparators); every language with a *named declaration* for it (C#, Go) made it storable. Turbo Pascal adding procedure types is the exact point Pascal's became storable.
+- PascalCase, not snake_case <- a signature sits in type position, and `sort(Item items[], item_comparison before)` reads as two parameter names in a row.
+
+**Paren-less calls** (`#procedures`)
+- Zero-or-one argument, statement position only <- a zero-argument paren-less call lets standard-library procedures read as keywords (`test_and_halt`), which shrinks the built-in language surface instead of growing it.
+- A bare name in argument position is a reference, never a call <- otherwise `baz foo` means "runs foo" or "does not run foo" depending on the callee's parameter type, which is type-directed hidden control flow. Cost accepted: `print get_score` is an error, `print get_score()` is the spelling.
+- Signatures not being a return type independently closes the same ambiguity, but the reference rule is the one that holds without it.
+
+**Procedure overloading** (`#procedure-overloading`)
+- Parameter names excluded <- a name is not part of the call's type information, so including it would let two indistinguishable call sites resolve differently.
+- Constrained numerics resolve as their base type <- constraints refine representation, not identity (`Language Implementation.md#unified-representation`).
+- Spec states least-coercion generally; the numeric ranking ("prefer the smaller scale change") lives in the implementation doc, because it is a consequence of the scaled-integer representation rather than a surface rule.
+- A type and a proc cannot share a name <- identifiers being unique within their scope already forbids it; no separate namespace rule is needed. Reverse identifier uniqueness and `Health(current: 100)` becomes ambiguous between construction and call.
+- -> Combined with dot-sugar on the first parameter, this covers the plain "one name, many types" case, so traits are needed only for generic code (`Pending.md#data-modeling-and-declaration-syntax`).
+- Open: a hand-written concrete generic query taking precedence over the autogenerated one is a specialization rule, and must be squared with these when generics are designed.
+
+**Statements and expressions** (`#statements-and-expressions`)
+- Expressions never contain statements <- no lambdas or closures (`#procedures`). A lambda is the construct that would put a statement body in an expression position, so declining it is what makes the one-directional nesting total rather than incidental. Statements still nest by containment: block bodies are statement lists.
+- A call is the only form that is both statement and expression <- `create`, `delete`, `match` and `fail`/`assert` are statement forms, and the value-producing form of `if` is the separate ternary spelling. So the rule only has to constrain calls; `a + b` and `e.Health` are excluded by not being statements at all, not by a purity test.
+- The side-effect requirement <- inferred procedure purity (`Pending.md#systems-scheduling-and-parallelism`). The rule is stateable now and checkable once purity inference lands, which other work needs regardless.
+- The previous iteration barred unbound construction on ownership grounds — the binding governs lifetime, so construction without a destination was invalid. Not carried: values are copied and own no memory. The general side-effect rule reaches the same cases and is preferred over a construction-specific one.
+- Discarding with `_` is not an exception <- `_ = f()` is an assignment statement that contains the call, so a side-effect-free call is reachable through the ordinary statement forms.
 
 ---
 
