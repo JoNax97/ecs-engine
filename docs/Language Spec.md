@@ -23,33 +23,49 @@ Comments are single line and start with a pipe character `|`. Comments have no c
 Statements are newline-terminated with no semicolons.
 Pure expressions must be part of a statement. A bare expression that discards its result is an error.
 
-### Naming
- 
-Type names are written in `PascalCase`; everything else in `snake_case`. Names must be unique within their scope. 2 types in the same module cannot share the same name.
+### Identifiers
+
+Identifiers in LoomScript can contain ASCII letters, numbers and underscores, and must start with a letter. Unicode characters are not valid in identifiers.
+Identifiers must be unique within their scope.
+
+By convention, type identifiers are written in `PascalCase`; everything else in `snake_case`.
  
 Component access on an entity keeps the type's casing, because it names a type rather than a field:
  
 ```
-e.Health.current      | one component lookup, one field offset
-e.Position.value.x    | one component lookup, two field offsets
+e.Health.current  | Health is a type, not a field
 ```
 
-### Declaration and assignment
+### Variables
  
-A single operator, `=`, is used for both declaring and reassigning a name.
-The first use of a name in a scope declares it and fixes its type; every
-subsequent use in that scope reassigns it. A name's type cannot change after
-its first declaration.
- 
+Variable types are static, they are fixed at declaration and cannot change.
+
+Variable declarations begin with the variable type followed by an identifier. They may carry [annotations](#annotations), and may omit the initializer, since data is zero-initialized.
+
 ```
-integer y = 0    | explicit declaration
-x = 5            | implicit declaration, type inferred
-x = 6            | reassignment
+integer health                   | zero-initialized
+integer ammo range(0..999) = 30  | explicit value, annotated
+```
+
+Inside procs and query bodies, variable declarations can be inferred by using the `let` keyword followed by an identifier. `let` infers the type from its initializer and therefore always requires one. `let` takes no annotations. A `let` declaration assumes the most generous representation available, so it can hold any value a declared field can produce. To control representation, use explicit declaration.
+
+A bare assignment using `=` reassigns a previously declared variable. Assigning an undeclared variable is an error.
+
+```
+let x = 5                        | inferred
+x = 6                            | reassignment
+```
+
+A bare `_` marks a discarded value. It may stand wherever an identifier would be bound, to ignore that binding, and may be repeated within a scope.
+
+```
+let div, _ = divmod(10, 3)
 ```
 
 ### Constants
 
-A `const` declaration binds a name to an expression composed from literals and other constants in scope.
+A `const` declaration binds a name to an expression composed from literals and other constants in scope. It may appear at the top level or inside any block.
+Constants cannot be given a type or annotations.
 
 ```
 const max_inventory = 30
@@ -165,16 +181,16 @@ For integer types, storage width and signedness is inferred from its declared ra
 The language uses fixed-point numbers to allow for fine-grained optimizations, while remaining simple to use for the common case.
 For decimal types, storage width and signedness is inferred from both range and precision.
 
-`precision(n)` is declared in **decimal places**, not bits. The Precision column below reports the resulting fractional width.
+`precision(n)` is declared in **decimal places**, and accepts `n` up to 5. The Precision column below reports the resulting fractional width.
 
 Storage widths are a guarantee, not an optimizer preference: a declaration that resolves to 16 bits will always be 16 bits, and may be budgeted against — for memory, and for the bandwidth it costs to synchronize. How widths are derived is in the implementation spec.
 
-| Declaration                                          | Width   | Signed | Precision |
-| ---------------------------------------------------- | ------- | ------ | --------- |
-| `decimal score`                                      | 32-bit  | yes    | 13 bits   |
-| `decimal health range(0..1000)`                      | 24-bit  | no     | 13 bits   |
-| `decimal position range(-10000..10000) precision(5)` | 32-bit  | yes    | 17 bits   |
-| `decimal rotation range(0..360) precision(2)`        | 16-bit  | no     | 7 bits    |
+| Declaration                                          | Width   | Signed | Fractional width |
+| ---------------------------------------------------- | ------- | ------ | ---------------- |
+| `decimal score`                                      | 32-bit  | yes    | 13 bits          |
+| `decimal health range(0..1000)`                      | 24-bit  | no     | 13 bits          |
+| `decimal position range(-10000..10000) precision(5)` | 32-bit  | yes    | 17 bits          |
+| `decimal rotation range(0..360) precision(2)`        | 16-bit  | no     | 7 bits           |
 
 ### Strings
 
@@ -279,10 +295,10 @@ All conditional branches are resolved and checked before any is stripped, so the
  
 A file's top level is evaluated once at load time. The following statements are valid at the top level:
  
-1. Type definitions via `define`.
-2. Constant bindings via `const`.
-3. Event listeners via `on <event>`.
-4. Load-time conditionals.
+1. Type definitions
+2. Constant and variable declarations
+3. Event listeners
+4. Load-time conditionals
 
 An example of a valid top-level structure: 
 
@@ -435,19 +451,27 @@ define value Label (
 
  > [!IMPORTANT]
  > Dynamic data is allowed only at a component top level. A `value` with a `dynamic` field cannot be used inside a component; hoist the field to the component itself.
- 
-Locals, parameters and query bindings are unaffected — there a bare string or array is considered dynamic, and no annotation is needed.
+
+Proc arguments and variables declared outside of defined types are not inlined by default. A bare string or array is dynamically backed and no annotation is needed.
+
+```
+string text  | Dynamically sized by default
+
+define proc sum(integer[] numbers)  | Argument can receive both dynamic and fixed arrays
+    ...
+end
+```
 
 ### Construction
 
 Types are constructed simply by name. There is no `new` operator. Field values can be passed positionally or by name. Named values must always be passed after positional ones.
 
 ```
-v = Vector3(0, 0, 0)
+let v = Vector3(0, 0, 0)
 
-w = Weapon(damage: 10, ammo: 100)
+let w = Weapon(damage: 10, ammo: 100)
 
-l = Label(text, size, alignment: Alignment.Left)
+let l = Label(text, size, alignment: Alignment.Left)
 ```
 
 ---
@@ -475,7 +499,7 @@ end
 
 
 | usage
-f = lerp(a, b, 0.5)
+let f = lerp(a, b, 0.5)
 ```
  
 Multiple return values are declared with a comma-separated, optionally named list after `returns`. The returned type is a tuple, which can be deconstructed at call site:
@@ -486,7 +510,7 @@ define proc divmod(integer a, integer b) returns integer div, integer mod
 end
 
 | usage
-div, mod = divmod(10, 3)
+let div, mod = divmod(10, 3)
 ```
 
 Parentheses at the call site are for grouping arguments. They may be omitted if the call passes a single argument and it's called as a statement (not nested inside a larger expression).
@@ -528,7 +552,7 @@ print entity.id
 ### Creation
  
 ```
-e = create Entity with 
+let e = create Entity with 
     Health(current: 100, max: 100),
     Position,
     Parent(other_entity)
@@ -543,7 +567,7 @@ Components of an entity can be accessed directly by using the component Type as 
 To check that a component is present before accessing it, use the `has` operator.
  
 ```
-h = e.Health  | fails if e does not have Health
+let h = e.Health  | fails if e does not have Health
 
 if e has Health
     print e.Health
@@ -578,7 +602,7 @@ where
     attacker.Faction != target.Faction and 
     not target has Shield
 do
-    h = target.Health
+    let h = target.Health
     h.current = h.current - attacker.Weapon.damage
 end
 ```

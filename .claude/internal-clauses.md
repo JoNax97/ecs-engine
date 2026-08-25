@@ -64,6 +64,38 @@ Living artifact. Read it before any design task, and update it in the same pass 
 - Monomorphization is affordable for the same reason a per-label bitmap is: enum labels are a small closed set.
 - All three are instances of `Design Principles.md#no-general-indexing-or-materialization` — a fast path qualifies only when it mounts on infrastructure the engine already maintains.
 
+**Inferred binding representation** (`#inferred-bindings`)
+- `f = 17` for a `let` decimal <- `precision(n)` caps at 5 (`Language Spec.md#numeric-types`), which makes 17 the widest fractional width any declaration can name. The two numbers are one decision; move either and the absorption guarantee breaks.
+- The cap itself <- Wasm has no widening 64x64 multiply, so a `2f` intermediate must fit in 64 bits. At `f = 17` that leaves 29 bits of integer part; at `f = 24` it leaves 15, which ordinary position math overflows.
+- Rejected: synthesizing the wide multiply, and using `v128`. Both cost the single-artifact property, since wasm3 implements neither i128 nor SIMD (`Runtime & Deployment.md#execution-backends`).
+- -> Reopening the cap depends on static range inference over `(range, f)` deciding per-expression whether a product fits. Same lattice as width inference; not designed.
+- Round-to-nearest on rescale <- truncation's error is directional, accumulating linearly rather than cancelling. Toward-zero is also the most expensive of the three modes in fixed point, since an arithmetic shift floors and negatives need a sign-dependent bias.
+
+---
+
+## Language Spec
+
+**Explicit declaration** (`#variables`)
+- <- Closes the pit-of-failure where a misspelled name silently declared a new binding.
+- `let` carries no annotations <- it means "representation does not matter", which is only honest where the generous representation is free. That is true of a stack slot and false of storage.
+- -> `let` is banned at the top level. Same premise: file state is laid-out storage, so the generosity has no basis there. Reverse the premise and the ban goes with it.
+- File-level variables are declared like fields, but bare variable-size data is dynamically backed rather than annotated, because `dynamic` opts a *field* out of inline storage and there is no enclosing layout at file scope.
+
+**File state is non-persistent** (`Engine Core.md#memory-tiers`)
+- <- Unmanaged memory sits outside every memory block, and the frame model synchronizes memory blocks. Non-sync and non-serialization are consequences of the tier, not separate rules.
+- Carried by scope rather than a keyword <- the failure modes correlate with misuse. A genuine cache is rebuildable, so reload wiping it is invisible; state that was secretly authoritative breaks loudly on the first reload.
+- Precedent is uniform: Bevy splits `Resource` from per-system `Local`, Unity DOTS keeps derived state in `ISystem` fields and authoritative state in singleton components, flecs splits world singletons from per-system `ctx`.
+- -> When systems become first-class, variables stay module-level. A system is not addressable, so `System.variable` would make it addressable through the back door.
+
+**Casing convention** (`#identifiers`)
+- Component access keeps the type's own casing <- it is the same symbol written in `with Health`, `create Entity with Health(...)` and `if e has Health`; lowercasing it only in access position would make one symbol change case by context.
+- It also marks where the cost is: component access is a keyed lookup that can miss and halt, while field access is a static offset under `Engine Core.md#component-flattening`.
+- Advisory, not compiler-enforced. Casing does not prevent collisions; what does is that a proc may not take a type's name (`Pending.md#data-modeling-and-declaration-syntax`, procedure overloading).
+
+**ASCII identifiers** (`#identifiers`)
+- <- Cost avoidance, not semantics. Unicode identifiers require NFC normalization and confusability handling — otherwise `é` as one codepoint and `e` plus a combining accent are different names that render identically, and Latin `a` and Cyrillic `а` are indistinguishable on screen. That is machinery bought to fix a problem that declining Unicode does not have.
+- Does *not* rest on the casing convention. A caseless script (CJK, Arabic, Hebrew) cannot express the PascalCase/snake_case split, but since casing is advisory that argument only ever reached style, never validity.
+
 ---
 
 ## Runtime & Deployment
@@ -88,3 +120,12 @@ Doc edits already known to be owed, blocked on a decision. Clear an entry the mo
 - Blocked on: whether systems become a first-class construct (`Pending.md#systems-scheduling-and-parallelism`, importance 5).
 - Owed edit: if systems land as a language construct, reword the principle to match what they actually are — an organization and scheduling construct, not a behaviour container. If they do not, strike `systems` from the primitive list.
 - Accepted as a known inconsistency in the meantime (Joaquin, 2026-08-22). Do not "fix" it by quietly deleting the word; the decision comes first.
+
+**Bound names versus the bare-`=` rule** (`Language Spec.md#variables`)
+- Blocked on: whether parameters, query bindings and loop variables can be reassigned (`Pending.md#data-modeling-and-declaration-syntax`, importance 3).
+- Owed edit: a sentence next to the reassignment rule covering bound names. As written, "a bare `=` reassigns a previously declared variable" reads as permitting `count = 0` on a parameter, because a bound name is in scope.
+- Whatever lands must draw the line at the name, not the data: `target.Health.current += damage` stays legal in every version.
+
+**`load` re-firing on hot reload** (`Runtime & Deployment.md#hot-reload`)
+- Blocked on: reload semantics for live state (`Pending.md#compilation-and-backend`, importance 4).
+- Owed edit: state whether `load` re-fires. File-level variables are Unmanaged and come back zero-initialized, so something must repopulate them; but re-firing duplicates the entities the first firing created.

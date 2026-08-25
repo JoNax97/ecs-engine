@@ -24,7 +24,7 @@ define component Velocity (
 const speed = 10
 
 on load do
-	create entity with
+	create Entity with
 		Position,
 		Velocity(Vector3.left * speed)
 end

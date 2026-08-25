@@ -33,11 +33,11 @@ Any storage model must satisfy these requirements:
 
 ## Memory Tiers
 
-Three tiers, distinguished by who owns the storage and how long it lives:
+- **Local** Short-lived memory, stack-backed. Includes locals, parameters, query bindings, etc.
+- **Managed** Stored inside a memory block controlled by the engine. Includes all component data.
+- **Unmanaged** Ordinary script memory — file and module level variables. Never reachable from a component.
 
-- **Inline.** Stored directly in the component. Fixed size, known at declaration.
-- **ECS-managed.** Stored outside the component but inside a managed memory block, with the component holding an offset. This is what `dynamic` selects.
-- **General.** Ordinary script-side memory — locals, parameters, query bindings. Never reachable from a component.
+Unmanaged memory is never synchronized and never serialized. State that has to cross a peer or survive a save belongs in managed memory.
 
 ### The flat-copyable rule
 

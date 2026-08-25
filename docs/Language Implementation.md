@@ -22,7 +22,7 @@ Signedness is taken from whether the declared range admits negative values. Widt
 
 ### Decimals
 
-`precision(n)` is declared in decimal places. The implementation selects the smallest **power-of-two fractional width** that represents `n` decimal places — that is, the smallest `f` where `2^f >= 10^n` — so that scaling between stored and logical values is a bit shift rather than a division. Total width is the fractional width plus the bits needed for the declared integer range, plus one for sign where the range admits negatives.
+`precision(n)` is declared in decimal places. The implementation selects the smallest **fractional width** that represents `n` decimal places — that is, the smallest `f` where `2^f >= 10^n` — so that scaling between stored and logical values is a bit shift rather than a division. Total width is the fractional width plus the bits needed for the declared integer range, plus one for sign where the range admits negatives.
 
 For example: `precision(5)` needs `2^f >= 100000`, giving `f = 17`; a range of `-8000..8000` needs 13 bits and a sign bit; `17 + 13 + 1 = 31, rounded up to 32`.
 
@@ -44,6 +44,14 @@ The unification is strictly internal. `integer` and `decimal` remain distinct ty
 ### Computation
 
 The rules above apply to in-memory storage. Computation expands operands to the maximum width (64-bit). Narrower computation paths are a performance question only, tracked in [Pending](Pending.md#compilation-and-backend).
+
+Rescaling a value to a narrower fractional width rounds to nearest, ties toward positive infinity: `(v + (1 << (f - 1))) >> f`. Truncation is not used — its error is directional, so it accumulates linearly through a chain of operations instead of cancelling.
+
+### Inferred bindings
+
+A `let` binding takes the most generous representation of its inferred surface type: 64-bit, with `f = 0` for `integer` and `f = 17` for `decimal`. Because `precision(n)` caps at `n = 5`, `f = 17` is the widest fractional width any declaration can name, so a `let` binding holds any value read from a declared field without narrowing.
+
+Products set that cap. A multiply produces a `2f` intermediate before rescaling, and Wasm has no widening 64×64 multiply, so the intermediate must fit in 64 bits: `f = 17` leaves 29 bits of integer part. Raising `f` costs that headroom twice over.
 
 ---
 
