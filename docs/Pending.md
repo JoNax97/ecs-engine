@@ -8,7 +8,8 @@ Everything known to be unresolved, organized by area. Recording an item here is 
 - `contradiction` (positions that conflict, with the previous iteration or internally)
 - `mechanism` (implementation reasoning worked out, but no syntax or semantics) 
 - `idea` (raised, not committed) 
-- `shelved` (considered and deliberately not adopted)
+
+Items decided against move to [Shelved](Shelved.md), which mirrors this document's sections.
 
 **Importance** rated 1–5 by how much other work the item blocks, not by how large it is.
 
@@ -79,7 +80,7 @@ Carried over from an earlier design layer, not yet reconciled with the current c
 
 The previous iteration's answer to absence is the handle state enum described under [Asynchronous operations](#storage-and-memory-layout) — `Pending` / `Ready` / `Failed` / `Dead`, with `.is_valid()` true only for `Ready`. There is no null and no separate `Result` type; absence, failure and pending completion are the same three-valued question asked of a handle.
 
-Frame-tier memory — bump-allocated, discarded at frame end — is the one tier with worked-out reasoning; it is what would make [GroupBy](#queries-and-predicates) technically safe.
+Frame-tier memory — bump-allocated, discarded at frame end — is the one tier with worked-out reasoning; it is what would make [GroupBy](Shelved.md#queries-and-predicates) technically safe.
 
 Null coalescing operator (Jose) depends on absence semantics being settled first.
 
@@ -174,7 +175,7 @@ What blocks a straight "bound names are immutable":
 
 ### Generics and trait/conformance syntax · `pending` · `3` · `syntax`
 
-Combined with dot-sugar on the first parameter, [procedure overloading](Language%20Spec.md#procedure-overloading) covers the plain "one name, many types" case, so traits are needed only for generic code.
+[Procedure overloading](Language%20Spec.md#procedure-overloading) covers the plain "one name, many types" case, so traits are needed only for generic code.
 
 Sketched in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#generics--traits), never carried forward. Generics resolve by monomorphization, with `<>` holding any compile-time parameter — type parameters and size parameters alike — and no marker needed, since types are never values and no ambiguity exists to guard against.
 
@@ -190,14 +191,6 @@ Two things to reconcile when this is taken up:
 From [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#components--lifetime-tiers): no separate handle type ever appears in the type system. The compiler switches a component's backing between stack bytes and entity storage based on what it can prove, and the author sees one type and one operation set throughout. Assignment always copies; behaviour differs by what is copied, never by a hidden type distinction. Query bindings are live-backed by construction.
 
 Worth evaluating against [Domain over technicism](Design%20Principles.md#domain-over-technicism) — it is the same idea applied to handles. The cost is that whether a write lands on entity data or on a local becomes a fact about provenance rather than about the type, which is exactly the kind of thing [No hidden control flow, no implicit costs](Design%20Principles.md#no-hidden-control-flow-no-implicit-costs) is suspicious of.
-
-### Dot-sugar on the first parameter · `shelved`
-
-`effect.get_magnitude()` for `get_magnitude(effect)`. Not adopted: it is a second spelling of a call that already has one, and it invites attaching behaviour to data instead of manipulating data.
-
-Dropping it keeps `.` meaning exactly one thing — reaching into data — and removes the need for a lookup rule between component types and procedures on an entity, which would have made the advisory casing convention load-bearing.
-
-The cost is that nested calls read inside-out. `let` bindings name the intermediates instead. If a pipeline style does become common, the answer is a threading construct rather than dot-sugar, so that `.` keeps meaning data.
 
 ### Threading construct · `idea` · `2` · `syntax`
 
@@ -222,7 +215,7 @@ To settle if taken up:
 - Whether the head must be a complete call. `get_magnitude(effect) then clamp(0, 1)` keeps `then` between verbs and leaves the innermost call nested, which is the one place nesting does not hurt. It also means a thread needs at least two operations, since one operation is a plain call.
 - Whether a step may have side effects. `then` never writes back, but a mutating step still mutates, and a mixed chain reads as one flowing transformation while half of it is a side effect on ECS data. Restricting steps to side-effect-free procedures makes a thread always a transformation that must be consumed, and leaves mutation in ordinary statements. That depends on [inferred procedure purity](#systems-scheduling-and-parallelism).
 - Whether a thread is an expression or a statement form, and how it interacts with the rule that a call without side effects cannot stand as a statement.
-- Whether it earns its place at all. It is open to the same objection that shelved dot-sugar: a second way to spell an existing construct. What differs is that it does not imply data owns behaviour. ECS bodies mutate fields more than they transform values, so the pipeline case may be too rare here to pay for a construct.
+- Whether it earns its place at all. It is open to the same objection that shelved [dot-sugar](Shelved.md#data-modeling-and-declaration-syntax): a second way to spell an existing construct. What differs is that it does not imply data owns behaviour. ECS bodies mutate fields more than they transform values, so the pipeline case may be too rare here to pay for a construct.
 
 ### `where` clause on procs · `idea` · `3` · `syntax`
 
@@ -334,10 +327,6 @@ Staggered update rates (e.g. distant entities every other frame) are treated sep
 
 No syntax for either. Open whether the cursor is author-visible state or a query-level annotation.
 
-### GroupBy · `shelved`
-
-Ruled out of the query language, but worth recording why the ruling might not hold. The objection that killed it was that materialized results reopen the heap-in-component hazard — and that objection does not apply if the result is scoped to frame-tier memory: bump-allocated, discarded at frame end, never touching a component. A transient, non-addressable GroupBy is therefore technically safe. It was rejected on the honest-costing bar instead — it did not clearly earn its cost — which is a design-taste call, not an architectural blocker. Revisit if a real use case appears.
-
 ### Empty-match fallback, and asymmetry in `for` clauses · `pending` · `4` · `syntax`
 
 A recurring shape has no spelling: run a body per match, and run something else once when an entity matched nothing. Written today it needs a manual flag variable set inside the inner iteration and tested after it, which is noise, and it is easy to get wrong — applying per-non-match what was meant to apply once.
@@ -396,16 +385,6 @@ Declaration syntax for custom, game-level events (e.g. `player_joined`) beyond t
 Remote state arrives as a raw chunk write rather than a script-initiated mutation. If the engine diffs received chunks and fires `changed`, that is a recurring per-frame cost, against the no-implicit-costs principle. If it does not fire, reactive gameplay code behaves differently on owning and remote peers, which is precisely the networking awareness the design aims to remove. Unresolved; the language cannot stay silent, as `changed` is author-visible.
 
 Mechanism side is tracked in [Language Implementation](Language%20Implementation.md#not-yet-written).
-
-### Single-use dynamic listeners · `shelved`
-
-Proposed form: `on <event> do once ... end`, written inside a proc or query body, registering a listener that fires at most once. The motivating case is a second-order effect expressed next to its cause — marking an entity and stating the reaction to a later event in the same place, rather than in a distant query.
-
-Rejected because a registration capturing an enclosing binding is a closure, and its environment has to survive the call frame. That makes it game-tier state that is neither fixed-size nor pointer-free, so it fails [the flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) and cannot be synchronized — peers would then disagree on second-order effects, which is the networking awareness [Transparent networking](Design%20Principles.md#transparent-networking-and-serialization) removes. It also requires a runtime subscriber list, against [Resolve at compile/load time](Design%20Principles.md#resolve-at-compileload-time), and leaves pending callbacks pointing into a module that [hot reload](#compilation-and-backend) may swap. Same shape as the argument that ruled out coroutines.
-
-What it was reaching for is already expressible: adding a marker component *is* the subscription, and a static query over that marker *is* the handler. That form is data rather than code, so it copies, syncs, survives reload, and is idempotent by construction — the component is present or absent, never registered twice. Removing the marker is the `once`.
-
-Worth revisiting only in the restricted form where capture is limited to a single entity binding. The captured environment is then exactly a marker component, and the construct becomes a static transform rather than a runtime registration. Open even then: what the generated component is called, whether it is author-visible, and whether the saved locality is worth a construct at all.
 
 ### Deferred execution within a frame · `idea` · `2`
 
@@ -524,20 +503,6 @@ Open: interaction with the existing rule that constants depending on a load-time
 ### Bundled source produces private types · `pending`
 
 From the previous iteration: sharing source between modules by local bundling, without registering a module, yields a distinct private type per bundler — by design, not as a defect. Sharing a real type requires a proper module dependency. Unstated in [Program Structure](Language%20Spec.md#program-structure), and the kind of rule that is discovered the hard way if left implicit.
-
-### Load-time codegen · `shelved`
-
-Folding load-time-known values into native code during the Wasm-to-native step at load, rather than emitting indirection for them. Would make any load-time-resolved constant free at run time instead of costing a lookup. Not needed while the only load-time fact is module presence, since a presence check is a branch rather than a value feeding computation. Becomes relevant the moment a load-time value participates in layout.
-
-### Load-time checking of dependency versions · `shelved`
-
-Allowing a manifest to admit a *range* of versions per dependency, with guards (`module.version >= 2`) selecting between implementations. The rule that makes it sound: unguarded code type-checks against the range's **floor**, and guards narrow only *upward*. Writes check against the floor, reads against the ceiling, so both stay statically decidable without enumerating configurations. Deferred because a single declared version per dependency removes the problem entirely, and version skew is a mod-ecosystem concern that will be designed better against real modules than in the abstract.
-
-### Virtualized data layouts · `shelved`
-
-Scripts addressing fields through a layout table populated at load, rather than baking static offsets. Would let a type's size or field widths vary per deployment while keeping one portable artifact. Rejected for now on the honest-costing bar: it puts an indirection on every field access to buy configuration flexibility that [Scripts are portable](Design%20Principles.md#scripts-are-portable) says the engine should be absorbing instead.
-
-Related and dropped outright rather than deferred: **two-tier compilation** (mods compiled once and portably, internal modules compiled per target). It resolves the same tension, but by giving up the single-artifact guarantee, and it splits the backend into two paths where the less-tested one is the one shipped to third parties.
 
 ---
 
