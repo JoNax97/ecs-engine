@@ -107,6 +107,52 @@ Living artifact. Read it before any design task, and update it in the same pass 
 - Does *not* weaken the traits argument: overloading alone covers "one name, many types" (`Language Spec.md#procedure-overloading`). Dot-sugar was ergonomics, never load-bearing for it.
 - Cost: nested calls read inside-out. If that becomes a real pressure the answer is a threading construct, not dot-sugar, so `.` keeps its single meaning.
 
+**Values and handles** (`Language Spec.md#data-modeling`)
+- Two behaviours, not three. Entities, components and future resources are all handles; everything else is a value. Reference semantics for handles are meant to read as classes do in a managed language, with the runtime owning the memory instead of a general arena.
+- Supersedes the provenance-inferred backing idea (previous iteration). That version made the destination of a write a fact about where an identifier came from; carrying it in the type makes it a fact about the type, which is what `Design Principles.md#no-hidden-control-flow-no-implicit-costs` asks for.
+- Validity is structural, not checked: a handle cannot be stored in a component or file state, nor held across a frame boundary, so it can never refer to data that is gone. Same shape as the signature rule — the reference exists only where it cannot be saved.
+- -> Settles the parameter question. A component parameter is a view because every component identifier is; a value parameter is a copy. What the user learns is the value/handle split, which is the ECS distinction they already need — not a by-value/by-reference calling convention.
+- -> Deferred structural change (create into a temporary region, move at the boundary; delete deferred to the same point) is what makes the guarantee hold, and it arrives as a consequence rather than as a feature. Ties to `Pending.md#errors-and-control-flow`, implicit transactional mutation.
+
+**Bindings are immutable** (`#bindings`)
+- Covers parameters, loop variables, query bindings and `is` bindings with one rule, rather than four answers. The narrowing case forces it: `is Heal heal` binds a live reference, so `heal = other` would be ambiguous between rebinding and writing through.
+- -> Parameters are always passed by reference, and a value parameter is copied only where the body writes into it (`Language Implementation.md#parameter-passing`). Writing into the parameter's own storage is the only channel through which a callee could observe how it was passed, and immutable bindings plus no reference parameters and no closures leave it as the only one. Reverse any of those and the copy decision stops being static.
+- Constrains the identifier, never the data. `target.Health.current += damage` and `heal.amount = 0` stay ordinary writes.
+- Cost is confined to parameters: no `arg += 1`, and with no shadowing form and identifiers unique per scope, deriving a value needs an explicit `let`. Accepted — the new identifier names what the value is.
+- Precedent: Odin forbids it, C/C#/Java/Go/JS allow it. Odin's reasoning is the one that transfers, and it is stronger here because the escape routes it depends on were already closed for other reasons.
+
+**Proven presence** (`#component-access`)
+- One rule across both contexts: component access is infallible exactly where a construct has proven presence — `with` in a query, `has X x` in an expression. Bare `e.Health` stays legal and fallible.
+- `has X x` is not merely shorter than `has X` plus `e.X`. It makes the access infallible *without* flow-sensitive checking, because the binding's validity comes from the construct that created it rather than from a fact carried across statements.
+- -> No fact to invalidate. An intervening call that might remove the component cannot make the binding illegal, which is what a narrowing checker would have to track through purity and access-set information.
+- Both spellings stay. The old bare-`has` form is unchanged, and the stutter in `has Health health` is accepted as unavoidable.
+- Open, and deliberately separate: whether the compiler *also* narrows bare access inside a guard (`Pending.md#data-modeling-and-declaration-syntax`). The enum case declined narrowing on syntax grounds, not on checker cost, so that door is not closed.
+
+**`in` takes a range and nothing else** (`#ranges`)
+- <- Cost, not syntax. `x in range(0..10)` is two comparisons; `x in array` is a linear scan. Same three characters, unrelated cost, which is what `Design Principles.md#no-hidden-control-flow-no-implicit-costs` forbids. Array membership is a call, so the work is visible where it is paid.
+- Precedent splits on exactly this line. Odin allows `in` only on maps, bit sets and ranges — all O(1) — and requires a procedure for slices. Rust, Swift, C# and Go have no membership operator at all. SQL's `IN` takes a literal list, whose length is visible in the source. Python is the counterexample: `x in list` is O(n) and `x in set` is O(1), identical to read, and a known trap.
+- -> `for i in range(...)` and `if x in range(...)` are one operand shape in two positions, rather than one keyword doing two unrelated jobs.
+- Literal ranges only for now; ranges are values, so a named range follows once value constants are settled (`Pending.md#data-modeling-and-declaration-syntax`).
+
+**Negated presence and narrowing** (`#operators`)
+- Single operators, not `not` applied to a result. That is what keeps them from being a second spelling of an existing composition — the objection that shelved dot-sugar.
+- `has no` and `has not` are both accepted, for the same operator, because English needs both: `has no` before a noun (`has no Shield`), `has not` before a past participle (`has not Moved`). Tags are frequently participles — `Moved`, `Dead`, `Stunned` — so neither form covers every operand. This is the one place two spellings were accepted deliberately, and it is grammar rather than preference.
+- `no` is reserved. Casing is advisory, so a component could legally be named `no`, which would make `e has no` ambiguous. `not` was already reserved as the boolean operator.
+- <- Precedent is direct rather than analogical: SQL `IS NOT NULL` / `NOT IN` and Python `is not` / `not in`, and SQL is a stated inspiration.
+- -> Removes a precedence question. `not target has Shield` needs `has` to bind tighter than `not`; `target has not Shield` has nothing to get wrong.
+- Nothing binds on a negated form, and treating it as its own operator makes that obvious rather than arbitrary. Under `not (effect is Heal heal)` the illegality would look like a carve-out.
+- `without` in a `for` clause is the structural form of the same test. Two contexts, one idea — cross-referenced so a third spelling does not appear.
+- `!=` stays separate: it compares values, `is not` tests a label.
+
+**Enums** (`#enums`)
+- Explicit label values dropped <- schema pre-agreement (Runtime & Deployment, *Schema agreement is a premise*) means no number needs to be stable outside the language. Ordinals also keep entity-attached labels dense, so component ids stay `base + offset`.
+- First label is the zero value <- everything else in the language zero-initializes to a valid value; an enum with an invalid state would be the exception. Consequence: declaration order is semantic, for the default and for label ordering both.
+- Bare-name construction of a payload label (`effect = Heal`) is not an enum rule at all <- it follows from a type being constructible by name alone (`#construction`), which was generalized for this. Ranges must include zero (`#ranges`), so a zeroed payload is always a legal value.
+- Whole-payload binding (`is Heal heal`) rather than positional destructuring (`is Heal(amount)`) <- `type name` is the language's own declaration shape, so no pattern sublanguage is introduced; adding a field to a label cannot silently rebind anything; and the payload is reached with `.` like every other field. Cost: `heal.amount` instead of `amount` for single-field payloads.
+- Rejected alternative: one declared type per payload (Zig, Odin). Same dot access, but forces a `HealData` declaration for a single integer.
+- Payload unreachable without a binding <- an enum value has no fields, so this needs no fallibility machinery. It also closes the three-inconsistent-spellings problem structurally rather than by convention.
+- Enums and tagged unions stay one construct. Rust/Swift/ML combine, Zig/Odin/C# split, and the dividing line is whether the label's *number* is part of the concept. Test for revisiting: count the "if payload-free" carve-outs. Relational operators are the first (`Pending.md#data-modeling-and-declaration-syntax`, comparison pass). A second and third mean it is two constructs sharing a keyword.
+
 **Signatures** (`#signatures`)
 - The rule is *a procedure reference must be derivable from source, not from data* — not "procedures are not values". The value framing bans comparators and sorting, which are legitimate; the source-derivability framing bans exactly the storage cases.
 - <- Static access-set extraction (`Engine Core.md#scheduling-and-execution`). A statically resolved reference propagates the callee's access set into the caller's exactly. A reference read from data makes the callee underivable; a conservative union over every proc ever assigned into the slot is decidable but pessimistic, and the pessimism is invisible at the call site — which `Design Principles.md#no-hidden-control-flow-no-implicit-costs` rules out.
@@ -141,6 +187,12 @@ Living artifact. Read it before any design task, and update it in the same pass 
 
 ## Runtime & Deployment
 
+**Schema agreement is a premise, not a per-feature concern** (`Engine Core.md#frame-model-and-synchronization`)
+- Peers pre-agree on every data schema — component ids, layouts, enum ordinals. Synchronization transfers raw bytes against that shared schema, so no wire-level identifier needs to be stable independently.
+- -> Declaration-order ordinals are safe for enums. Explicit label values were dropped partly on this basis (`Language Spec.md#enums`); nothing outside the language assigns meaning to the number.
+- For saved data the answer is to store the schema alongside the raw data and remap on load when it has changed, rather than to freeze identifiers at the language level. Version skew is handled once, in the save path, instead of constraining every declaration.
+- Reverse the pre-agreement premise — a peer or save that can carry data written against an unknown schema — and stable identifiers become load-bearing everywhere.
+
 **Console backend choice** (`#execution-backends`)
 - Console portability is not blocked by Wasm as such; the constraint is JIT, forbidden by certification. AOT and interpretation both sidestep it while keeping one artifact.
 
@@ -161,11 +213,6 @@ Doc edits already known to be owed, blocked on a decision. Clear an entry the mo
 - Blocked on: whether systems become a first-class construct (`Pending.md#systems-scheduling-and-parallelism`, importance 5).
 - Owed edit: if systems land as a language construct, reword the principle to match what they actually are — an organization and scheduling construct, not a behaviour container. If they do not, strike `systems` from the primitive list.
 - Accepted as a known inconsistency in the meantime (Joaquin, 2026-08-22). Do not "fix" it by quietly deleting the word; the decision comes first.
-
-**Bound names versus the bare-`=` rule** (`Language Spec.md#variables`)
-- Blocked on: whether parameters, query bindings and loop variables can be reassigned (`Pending.md#data-modeling-and-declaration-syntax`, importance 3).
-- Owed edit: a sentence next to the reassignment rule covering bound names. As written, "a bare `=` reassigns a previously declared variable" reads as permitting `count = 0` on a parameter, because a bound name is in scope.
-- Whatever lands must draw the line at the name, not the data: `target.Health.current += damage` stays legal in every version.
 
 **`load` re-firing on hot reload** (`Runtime & Deployment.md#hot-reload`)
 - Blocked on: reload semantics for live state (`Pending.md#compilation-and-backend`, importance 4).

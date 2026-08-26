@@ -55,6 +55,16 @@ Products set that cap. A multiply produces a `2f` intermediate before rescaling,
 
 ---
 
+## Parameter Passing
+
+Parameters are always passed by reference. A value parameter is copied only if the body writes into it.
+
+The copy is decided at compile time, not checked at run time: a [binding](Language%20Spec.md#bindings) cannot be reassigned, and the language has no reference parameters or closures, so writing into the parameter's fields is the only way to modify it. In this case, a copy is automatically generated on entry.
+
+For values smaller than a reference, the compiler can choose to always pass it by value if that's more performant.
+
+---
+
 ## Enum Payloads
 
 An enum label may carry a payload, so an enum is laid out at the size of its largest variant plus its label discriminant. The size is therefore fixed and known at declaration, which is what keeps enums usable as component fields under the flat-copyable rule.

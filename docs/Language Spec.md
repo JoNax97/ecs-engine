@@ -12,6 +12,8 @@ The language aims to minimize the usage of punctuation marks and instead chooses
 
 Parentheses are used to group elements. Wherever a construct reads unambiguously without them, they may be dropped, and the parentheses-less form is considered idiomatic. The conditions for dropping are stated case-by-case.
 
+Identifiers may be written unqualified wherever the context determines what they refer to. The qualified form is always valid.
+
 Comments are single line and start with a pipe character `|`. Comments have no closing character, and run to the end of the line.
 
 ```
@@ -41,7 +43,7 @@ lerp(a, b, 0.5)                        | Pure procedure with result unused
 ### Identifiers
 
 Identifiers in LoomScript can contain ASCII letters, numbers and underscores, and must start with a letter. Unicode characters are not valid in identifiers.
-Identifiers must be unique within their scope.
+Identifiers must be unique within their scope. Keywords are reserved and cannot be used as identifiers.
 
 By convention, type identifiers are written in `PascalCase`; everything else in `snake_case`.
  
@@ -53,9 +55,9 @@ e.Health.current  | Health is a type, not a field
 
 ### Variables
  
-Variable types are static, they are fixed at declaration and cannot change.
+A variable is an identifier whose value can change. It is declared with a type and assigned with `=`.
 
-Variable declarations begin with the variable type followed by an identifier. They may carry [annotations](#annotations), and may omit the initializer, since data is zero-initialized.
+Variable types are static: fixed at declaration and unable to change. Declarations begin with the type followed by an identifier, may carry [annotations](#annotations), and may omit the initializer.
 
 ```
 integer health                   | zero-initialized
@@ -71,16 +73,25 @@ let x = 5                        | inferred
 x = 6                            | reassignment
 ```
 
-A bare `_` marks a discarded value. It may stand wherever an identifier would be bound, to ignore that binding, and may be repeated within a scope.
+### Bindings
+
+A binding is an identifier whose value is supplied by the construct that introduces it: procedure parameters, loop variables, entities in a query, and casted values.
+
+A binding cannot be reassigned, but it can be mutated if the underlying type allows it. To derive a new value from a parameter, declare one.
 
 ```
-let div, _ = divmod(10, 3)
+define proc apply_damage(Health health, integer amount)
+    amount = clamp(amount, 0, health.current)        | Invalid, amount cannot be reassigned
+    let dealt = clamp(amount, 0, health.current)     | Do this instead
+    health.current -= dealt                          | Valid, health is mutated, not reassigned
+end
 ```
 
 ### Constants
 
-A `const` declaration binds a name to an expression composed from literals and other constants in scope. It may appear at the top level or inside any block.
-Constants cannot be given a type or annotations.
+A constant is an identifier whose value is fixed before the program runs. It is assigned once, from an expression composed of literals and other constants in scope, and is never reassigned.
+
+A `const` may appear at the top level or inside any block. Constants cannot be given a type or annotations.
 
 ```
 const max_inventory = 30
@@ -88,20 +99,33 @@ const max_inventory = 30
 integer slots[max_inventory]
 ```
 
+### Discards
+
+A bare `_` marks a value that is not needed: a discarded return value, an unused parameter, an unused loop variable. It may be repeated within a scope. Some constructs  allow the identifier to be omitted entirely, in which case the discard is not needed.
+
+```
+let div, _ = divmod(10, 3)
+```
+
 ### Operators
  
-- Arithmetic:  `+ - * / %` 
-- Comparison:  `== != < <= > >=`
-- Boolean: `and or not`
-
-Arithmetic operators can be compounded with assignment:
+Mathematical operators define addition ` + `, subtraction ` - `, multiplication ` * `, division ` / ` and remainder ` % `  
+They can be compounded with assignment:
 
 ```
 x += y
 n *= t
 ```
+There are no unary increment/decrement operators (` ++ -- `).
 
-There are no increment/decrement operators (`++ --`).
+Comparison operators define equality ` == `, inequality ` != `, and arithmetic comparisons ` < <= > >= `
+
+- Boolean: `and`, `or`, `not`
+- Presence: `has`, `has no`, `has not`
+- Narrowing: `is`, `is not`
+- Membership: `in`, `not in`
+
+The negated forms are single operators, different from `not` applied to a result, and are considered idiomatic. Nothing can be bound by a negated form. `has no` and `has not` are the same operator, with a small spelling concession for legibility.
 
 ## Control flow
 
@@ -246,6 +270,16 @@ Unspecified beyond their use as multiple return values; see [Pending](Pending.md
 
 A range constraining a numeric type must include zero. Data is always zero-initialized, so a range that excluded it would declare its own starting value impossible. `range(-10..100)` is fine; `range(1..999)` is not, and costs nothing to widen, since both spellings resolve to the same storage width.
 
+The `in` operator tests membership, and takes a range as its right operand.
+
+```
+if damage in range(0..100)
+    ...
+end
+
+when in range(0..5)   | as a match arm
+```
+
 A declared range narrows storage but does not bound it exactly — `range(-10..100)` resolves to a signed byte, which can hold -128. Writing a value outside the declared range fails. Values never wrap; use `%` where wrapping is the intent. Clamping is available but requires explicit syntax, so it is never what happens by accident.
 
 ## Program Structure
@@ -272,7 +306,7 @@ Events are the main way by which scripts hook into the running game. There are n
 
 Use the `on` keyword to listen to events. Both procedures and queries can be hooked up to events. Anonymous blocks can also be declared as listeners.
 
-Listeners are bound statically. Every listener is declared at the top level and is resolved by the load boundary; a listener cannot be registered, replaced or removed while the game runs. A listener that should not act is expressed by matching nothing, or pruned entirely by a [load-time conditional](#load-time-conditionals) — not by unsubscribing.
+Listeners are attached statically. Every listener is declared at the top level and is resolved by the load boundary; a listener cannot be registered, replaced or removed while the game runs. A listener that should not act is expressed by matching nothing, or pruned entirely by a [load-time conditional](#load-time-conditionals) — not by unsubscribing.
 
 ```
 on load do
@@ -340,6 +374,13 @@ In this language, data and behavior are modeled directly as ECS primitives. All 
 Many data types declare fields or arguments. These are declared in parentheses and are comma-separated. 
   
 Fields cannot declare default values, and are always zero-initialized. 
+
+Every type is either a value or a handle, and that decides what an identifier naming it does.
+
+- A **value** is copied on assignment. Two identifiers never name the same value, and writing through one cannot be observed through another.
+- A **handle** refers to data the runtime owns. Entities and components are handles. Assignment copies the handle, not the data, so two identifiers may name the same data and a write through either is visible through both.
+
+Handle data is not addressable outside the frame it is used in. A handle may not be stored in a component, in file state, or held across a frame boundary, so a handle can never refer to data that no longer exists.
  
 ### Values
  
@@ -374,29 +415,51 @@ define tag Stunned
  
 ### Enums
  
-An `enum` is a closed set of named labels. Each label may optionally carry a data payload. Each label has a numeric value, defined explicitly or by declaration order. 
- 
+An `enum` is a closed set of named labels. Labels optionally may have one more fields.
+Each label also has numeric value derived from its declared order. The first label is the default one and always equals zero.
+
 ```
 define enum Effect (
     Nothing,
     Stun,
-    Heal(integer amount) = 10    
+    Heal(integer amount range(0..1000), Entity source)
 )
 ```
- 
-Enums can be pattern-matched using `match` statements. The type of the enum does not need to be restated for each clause.
+
+Enums can be pattern-matched using `match` statements. A label's fields are accessed by binding the label to an identifier:
 
 ```
 match effect 
 	when Stun
 		apply_stun(target)
-	when Heal(amount) 
-		target.Health.current += amount
+		
+	when Heal heal
+		target.Health.current += heal.amount
+		
 	when Nothing  | no-op 
 end
 ```
 
-Enums can be added directly to entities, in which case they behave as an exclusive set of tags/components.
+The `is` operator can also be used to test a label and bind it to an identifier.
+
+```
+if effect is Stun   | no payload to bind
+    apply_stun(target)
+end
+
+if effect is Heal heal
+    heal.amount = min(heal.amount, remaining)
+    target.Health.current += heal.amount
+end
+```
+
+Enums can be added directly to entities, in which case they behave as an exclusive set of tags/components. Presence is tested with `has`, and the label with `is`.
+
+```
+if e has Effect              | the entity has any effect
+if e has Effect.Stun         | the entity has the stun effect
+if e.Effect is Heal heal     | errors if the entity has no effect
+```
  
 ### Relationships
  
@@ -430,7 +493,6 @@ define relationship Likes (
 ```
  
 Transitive, ephemeral and exclusive relationships are unspecified; see [Pending](Pending.md#relationships).
-
 
 ### Visibility
  
@@ -479,10 +541,15 @@ end
 
 ### Construction
 
-Types are constructed simply by name. There is no `new` operator. Field values can be passed positionally or by name. Named values must always be passed after positional ones.
+Types are constructed simply by using the type identifier. There is no `new` operator. 
 
+Field values can be passed positionally or by name. Named values must always be passed after positional ones.
+Parens are optional when no values are assigned.  Values not passed are initialized with their zero values. 
+ 
 ```
-let v = Vector3(0, 0, 0)
+let v = Vector3 | Same as to Vector3()
+
+v = Vector3(1, 2, 3)
 
 let w = Weapon(damage: 10, ammo: 100)
 
@@ -626,7 +693,21 @@ let h = e.Health  | fails if e does not have Health
 if e has Health
     print e.Health
 end
+
+if e has no Shield
+    apply_damage(e, amount)
+end
 ```
+
+`has` can also bind the component to an identifier for safe and direct use.
+
+```
+if e has Health health
+    health.current -= 10
+end
+```
+
+Both forms stay available: a bare `has` followed by ordinary component access is unchanged, and remains fallible.
 
 ### Change Tracking
 
@@ -675,7 +756,7 @@ A condition belongs in `where` when it involves comparing a component's fields a
 
 ### The `for` clause
 
-The for clause expresses a list of entities to be bound and iterated. Every name introduced in a `for` clause is always bound to an `Entity`.
+The for clause expresses a list of entities to be bound and iterated. Every identifier introduced in a `for` clause is always bound to an `Entity`. Entity bindings cannot be discarded using `_`.
 
 The simplest `for` clause matches all entities:
 
