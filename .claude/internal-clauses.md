@@ -107,6 +107,34 @@ Living artifact. Read it before any design task, and update it in the same pass 
 - Does *not* weaken the traits argument: overloading alone covers "one name, many types" (`Language Spec.md#procedure-overloading`). Dot-sugar was ergonomics, never load-bearing for it.
 - Cost: nested calls read inside-out. If that becomes a real pressure the answer is a threading construct, not dot-sugar, so `.` keeps its single meaning.
 
+**Non-goals section** (`Language Spec.md#non-goals`)
+- Purpose is calibration, not justification: a reader arriving from C# or Rust learns the shape of the language before the syntax. It is not a rationale list — the *why* stays in `Shelved.md` and here.
+- Entry condition: only **settled** absences. `null`, exception propagation and threading are excluded because their entries are still open in `Pending.md`; listing them would state a decision that has not been made.
+- "No asynchronous execution" is admissible despite the async mechanism being undesigned, because the synchronous property is settled independently of which mechanism is chosen (`Pending.md#storage-and-memory-layout`, asynchronous operations).
+- Not the home for small feature absences (unary `++`, operator overloading, dot-calls, macros). Those are lookup answers, already inline where they matter, and would turn the section into a dumping ground.
+- Load-bearing negatives do **not** live here. A rule a checker enforces goes where it bites, as part of the positive rule it constrains — otherwise it reads as trivia and gets missed.
+
+**Tuples** (`Language Spec.md#tuples`)
+- Stack-only <- a storable tuple would need a position under the flat-copyable rule, and would then be a `value` without a name. Keeping them off `define`d types removes the storage, schema and taint questions outright rather than answering them.
+- No annotations on elements <- annotations attach to declarations and a tuple literal is not one. Consistent with `let` taking none (`#variables`). This is also a second reason a tuple cannot be a component field: a `string` or array inside a `define`d type must state its storage (`#storage`) and a tuple has nowhere to state it.
+- Cap of four <- makes ordinal accessors complete: `first` through `fourth` cover the whole space, so unnamed tuples never need `.0` and `[]` keeps its single meaning (`#basic-syntax`). Past four the better option is a `value`, which costs one line. Reverse the cap and positional access has to come back.
+- Names documentation-only <- the `signature` precedent, matching by type and order (`#signatures`). Consequence: named and unnamed tuples are the same type, so the no-mixing rule constrains *literals*, not types.
+- Implicit construction, never implicit deconstruction <- the asymmetry is what kills the spread/nest ambiguity. Under it `f(10, 5)` and `f((10, 5))` are two different types and nothing flattens, so no call-site text means different things depending on the callee. Ranking construction as a coercion is what lets an exact parameter match win over it (`#procedure-overloading`).
+- Deconstruction is an explicit construct <- without that, "never taken apart implicitly" would contradict `let div, mod = divmod(10, 3)`, which the spec already had. Same status as `_` in `#discards`.
+- Not iterable <- a heterogeneous sequence can only be walked by compile-time unrolling, whose body must typecheck per element type. That is generic-code machinery and would make tuples depend on `Pending.md#data-modeling-and-declaration-syntax` generics.
+
+**Heterogeneity only behind a handle** (`Language Spec.md#non-goals`, no universal type)
+- <- A layout constraint, not a type-system one: one stride cannot cover several layouts, so a contiguous buffer holds mixed types only via indirection or a discriminant plus largest-variant padding. Monomorphization does not help — it duplicates code and each copy is still homogeneous.
+- <- The language has exactly one indirection, the handle (`#data-modeling`), and handles are uniform-width by construction. So `Component[]` is admissible where a mixed value array is not, with no boxing and no padding.
+- -> This is what rules out `any`, and what sends the two heterogeneous-sequence cases — component packs and `print` — to `Pending.md#data-modeling-and-declaration-syntax` rather than to a universal type.
+- -> `enum` remains the sanctioned *closed* heterogeneous form: largest-variant layout, flat-copyable, no indirection. The rule bans open heterogeneity, not tagged unions.
+- Stated as an expectation in `#non-goals` and enforced per-construct where it bites. Deliberately not written as a standalone positive rule in `#data-modeling` (Joaquin, 2026-08-28) — the spec states what the language has, and every construct that could violate this already carries its own rule.
+
+**Array literals use brackets** (`Language Spec.md#arrays`)
+- <- An unnamed tuple literal and a parenthesized homogeneous list are the same text. Disambiguating by homogeneity would make a literal change category when an element's type changes, which is the context-dependence the rest of the design avoids.
+- <- `[]` already means "N of this type", so the literal matches the declaration form. Cost accepted: `[` now opens a literal as well as closing a declaration bound.
+- No separate list type <- an unnamed, homogeneous, indexable, iterable sequence is an array with a literal-inferred bound. Naming it something else would be a second spelling for one construct.
+
 **Values and handles** (`Language Spec.md#data-modeling`)
 - Two behaviours, not three. Entities, components and future resources are all handles; everything else is a value. Reference semantics for handles are meant to read as classes do in a managed language, with the runtime owning the memory instead of a general arena.
 - Supersedes the provenance-inferred backing idea (previous iteration). That version made the destination of a write a fact about where an identifier came from; carrying it in the type makes it a fact about the type, which is what `Design Principles.md#no-hidden-control-flow-no-implicit-costs` asks for.
@@ -213,6 +241,9 @@ Doc edits already known to be owed, blocked on a decision. Clear an entry the mo
 - Blocked on: whether systems become a first-class construct (`Pending.md#systems-scheduling-and-parallelism`, importance 5).
 - Owed edit: if systems land as a language construct, reword the principle to match what they actually are — an organization and scheduling construct, not a behaviour container. If they do not, strike `systems` from the primitive list.
 - Accepted as a known inconsistency in the meantime (Joaquin, 2026-08-22). Do not "fix" it by quietly deleting the word; the decision comes first.
+
+**"The language has arrays and nothing else"** (`Pending.md#data-modeling-and-declaration-syntax`, sets and maps)
+- Owed edit: tuples now exist, so the opening line of that entry is stale. Left alone because the entry's argument is about containers under the flat-copyable rule, which tuples do not change — they are stack-only.
 
 **`load` re-firing on hot reload** (`Runtime & Deployment.md#hot-reload`)
 - Blocked on: reload semantics for live state (`Pending.md#compilation-and-backend`, importance 4).

@@ -138,6 +138,11 @@ The previous design required explicit per-query read/write declarations, on the 
 
 What remains open is the analysis pass itself — it is what makes parallelism a safe hint rather than an unchecked claim, and it is assumed everywhere and specified nowhere.
 
+Two constraints on where it can sit in the pipeline, both from later decisions:
+
+- A generic proc's access set is per-instantiation, so extraction has to run **after** monomorphization for the scheduler to see the real reads and writes.
+- Extraction unions across branches, so a set is an over-approximation — false conflicts, never missed ones. That is what lets [erased component handles](#data-modeling-and-declaration-syntax) stay sound, since every typed access there sits under a narrowing arm.
+
 ### Inferred procedure purity · `idea` · `3`
 
 A procedure's purity is derived by the compiler from the same analysis that extracts access sets: a proc that writes no ECS data and calls no impure proc is pure. Nothing is declared, so the common case carries no signature noise, which is the cost Verse pays for its `<computes>`/`<reads>`/`<writes>` effect specifiers and the reason its "learnable as a first language" goal is in tension with its own effect system.
@@ -254,9 +259,63 @@ If they arrive, membership takes [`in`](Language%20Spec.md#ranges) rather than a
 
 A map literal is also the other construct that conventionally wants `:`, which is what [the named-argument separator](#data-modeling-and-declaration-syntax) is waiting on.
 
-### Tuples · `pending` · `3`
+### Heterogeneous argument packs · `idea` · `3`
 
-[Tuples](Language%20Spec.md#tuples) exist only as the return type of a multi-value proc. Whether they are a general type — declarable, storable in a component, bindable — is unspecified. A storable tuple would need a position under the flat-copyable rule.
+[Tuples](Language%20Spec.md#tuples) are capped at four elements and cannot be iterated, so they do not serve the two places the language needs an unnamed heterogeneous sequence: a `create ... with` component list, and a `print`-style argument list. Both are currently grammar — a comma list a construct interprets — and neither can be bound to an identifier.
+
+Varargs does not close this. Varargs is sugar over a stack-allocated array literal, so it is homogeneous by construction; `print("hp: ", hp)` is not.
+
+Two candidate mechanisms, neither designed:
+
+- Variadic generics plus compile-time expansion, which would also remove the asymmetry where `with` can unroll a heterogeneous sequence and no user-written proc can.
+- A closed variant. `enum` is already a tagged union with largest-variant layout and is flat-copyable by construction, so an array of a `Printable` enum needs no new type machinery. Costs a conversion at every call site, padding to the largest variant, and closure — another module cannot extend the set.
+- A tagged pack: a self-describing byte stream of inline type tag plus payload, walked once, never indexed. Precedent is the ECS command buffer in Unity and Bevy. It is not boxing — the payload is inline and contiguous — but its stride is data-dependent, so it is an encoding for transient and serialized sequences, never a storage layout. The same encoding serves [schema-tagged saved data](#compilation-and-backend) and the deferred command buffer under [handle lifetime mechanics](#data-modeling-and-declaration-syntax).
+
+The fourth option is that `print` is a compiler intrinsic and is simply not expressible in the language. Odin, whose numeric model this language otherwise follows, chose the opposite with `..any`, so this is a real fork rather than an oversight.
+
+Also unspelled: the varargs declaration syntax itself, and where the call-site array's element representation comes from — which is the entry below.
+
+### An array-typed parameter erases its element representation · `discrepancy` · `3`
+
+Storage width is derived from a declaration's `range` and `precision`, and [Numeric Types](Language%20Spec.md#numeric-types) states widths are a guarantee that may be budgeted against. An array declaration carries those annotations once and every element shares them, so an array is homogeneous — but the parameter that receives it is spelled bare.
+
+```
+define proc sum(integer[] numbers)
+```
+
+`integer x range(0..999)` yields 16-bit elements and a bare `integer` yields 32-bit, and both are `integer[]`. Same for `decimal[]` across differing fractional widths. So that signature either accepts one representation only, or silently rescales — and rescaling an array breaks two stated rules at once: widths as a guarantee, and [parameters are always passed by reference](Language%20Implementation.md#parameter-passing), since a rescale forces a copy of the whole array.
+
+The consistent fix is to make the element representation part of the array's type and generic over it, monomorphized per instantiation — the sized-generic shape sketched in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#arrays-fixed-strings-symbolstags-sized-generics), extended from capacity to `(range, f)`. That makes this blocked on [generics](#data-modeling-and-declaration-syntax).
+
+Note what does *not* need instantiating: [computation expands every operand to 64 bits](Language%20Implementation.md#computation), so there is no per-width arithmetic to emit — only a widening load, a rescale shift, and a narrowing store. A proc body can compile once and specialize its accessors.
+
+### Erased component handles · `pending` · `3`
+
+A proc taking `Component c` needs no type hierarchy — `Component` is a compile-time constraint and the proc is monomorphized, so `remove_component` works without dispatch. What that does not cover is holding a *set* of differently-typed components: a save file's contents, an editor selection, a batch of removals.
+
+An array cannot hold them, because a single stride cannot cover several layouts. Monomorphization does not help — it duplicates code, and each copy is still homogeneous.
+
+The proposal to design: heterogeneity is permitted only behind indirection, and the language has exactly one indirection — the handle. Component handles are uniform-width and already carry entity plus component identity, so `Component[]` is stride-uniform with no boxing and no largest-variant padding. Frame-locality falls out for free, since a handle may not be stored in a component or held across a frame boundary.
+
+Conditions the design has to keep:
+
+- The constraint bounds the *operations*, not just the type. Type-agnostic structural work only — remove, `has`, whole-copy, serialize — all of which need just entity and component id.
+- A typed field is reachable only through narrowing (`if c is Health h`). Exhaustiveness is impossible since the component set is open, so a default arm is mandatory, unlike `enum`'s closed `match`.
+- No reflection and no string-keyed access, or [access-set extraction](#systems-scheduling-and-parallelism) becomes incomplete rather than merely imprecise.
+
+Extraction survives under those conditions: a narrowing arm is a branch, and extraction already unions across branches, so the set is an over-approximation — false conflicts, never missed ones. The cost is scheduler precision, and it is opt-in.
+
+Blocked on a `ComponentId` type, which belongs to [the core API](#core-api).
+
+### Bulk entity creation · `idea` · `2` · `syntax`
+
+No syntax for creating many entities at once. A candidate spelling:
+
+```
+let batch = create Entity[10] with Health(100), Position
+```
+
+The `with` list is evaluated once and shared, so the ten entities are identical. The result is an array of entity handles, which is homogeneous, stack-only and frame-local, so it needs no new rules. What varying per-entity data would look like is undesigned, and it is the reason to keep this open rather than fold it into [Creation](Language%20Spec.md#creation).
 
 ### Comparison and equality across data types · `pending` · `3`
 
@@ -268,7 +327,9 @@ The enum case is the one already known to be inconsistent, and it is what surfac
 
 ### Named-argument separator · `idea` · `1` · `syntax`
 
-`:` is currently the only colon in the language, used solely to name a field at construction — `Weapon(damage: 10, ammo: 100)`. Worth evaluating whether `=` reads better and is more consistent, since the operation is assigning a value to a named field.
+`:` names a field at construction — `Weapon(damage: 10, ammo: 100)` — and labels an element in a [tuple](Language%20Spec.md#tuples) literal. Worth evaluating whether `=` reads better and is more consistent, since the operation is assigning a value to a named field.
+
+Those two sites are not the same mechanism, despite looking alike. Construction resolves names against a declared field schema and zero-fills what is omitted; a tuple literal has no declaration, so its labels come from the literal itself and no element may be omitted. So `:` already carries two meanings, and a decision here has to move both.
 
 Deferred rather than decided, because the answer depends on whether a dictionary or map literal is ever added. That is the other construct that conventionally wants `:`, and if it arrives, keeping the colon reserved for it may be worth more than the consistency gained here.
 
@@ -567,6 +628,8 @@ From the previous iteration: sharing source between modules by local bundling, w
 Scripts already depend on a body of engine-provided types and procedures that no document describes — vector types and their value constants, random number generation, elapsed tick time, geometric predicates, and ordinary math. [Engine API](Engine%20API.md) now holds the boundary and the areas; almost none of the contents are settled.
 
 Distinct from the [host embedding API](#compilation-and-backend), which is about what capabilities the host grants a guest module. The core API is present in every deployment and is not a capability question.
+
+One member is already load-bearing elsewhere: a `ComponentId`, a runtime value naming a component type. [Erased component handles](#data-modeling-and-declaration-syntax) needs it, structural changes driven by data — save files, network messages, editor selections — need it, and it is what lets a deferred removal be recorded without holding the component. It is an identifier, not polymorphism.
 
 ### Timer primitive · `mechanism` · `3`
 

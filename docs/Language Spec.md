@@ -3,7 +3,19 @@
 This document specifies the syntax and features of **LoomScript**, an ECS-native scripting language designed for the **Loom game engine**, inspired by SQL, Datalog and Rust.
 
 LoomScript's constructs are closely tied to the ECS architecture. It is not meant to be a general-purpose programming language.
- 
+
+## Non-goals
+
+The following are absent by design, not features awaiting implementation.
+
+- **No garbage collector.** The runtime owns memory. Components live in ECS storage and locals live on the stack; nothing an author writes allocates.
+- **No manual memory management.** No pointers, no allocate and free, no ownership annotations.
+- **No inheritance and no subtyping.** Composition is the ECS itself. Shared behaviour is procedure overloading.
+- **No closures, lambdas, or first-class functions.** Procedures are named and resolved at compile time, and are passed only through a [signature](#signatures).
+- **No reflection.** Type and field information is not available to a running script.
+- **No dynamic typing and no universal type.** Every value's type and layout are known at compile time.
+- **No asynchronous execution.** Nothing suspends a body mid-frame. An operation that spans frames is observed on a later frame, never awaited.
+
 ---
  
 ## Basic Syntax
@@ -260,9 +272,48 @@ integer slots[]      | unbounded, dynamically backed
 
 Inside a `define`d type, an array must state its storage: either a bound, or `dynamic`. See [Storage](#storage).
 
+An array literal is a bracketed, comma-separated list of values of a single type. Its bound is the number of elements written.
+
+```
+let scores = [10, 20, 30]    | integer[3]
+```
+
 ### Tuples
 
-Unspecified beyond their use as multiple return values; see [Pending](Pending.md#data-modeling-and-declaration-syntax).
+A tuple is a fixed group of up to four elements of differing types. A tuple type is written as a parenthesized parameter list. Elements take no annotations, and a tuple takes the representation its initializer produces.
+
+Tuple elements are either all named or all unnamed; the twoe cannot mixed. Unnamed elements are accessed by ordinal names: `first`, `second`, `third`, `fourth`.
+
+```
+let pair = (x, y)
+let result = (min: n, max: m, avg: q)
+
+print pair.first
+print result.min
+```
+
+Tuples are stack-only: a tuple cannot be a field of a `define`d type. It cannot be indexed or iterated.
+Tuples are compared structurally: Two tuples are compatible when their element types and order match. Element names are not considered.
+
+A tuple is constructed implicitly when an argument list is passed to a tuple parameter, and is never taken apart implicitly. Implicit construction is a coercion, so an exact parameter match is preferred over it.
+
+```
+define proc translate(Entity e, (integer x, integer y) delta) 
+...
+end
+
+translate(e, 1, 2)      | builds the tuple
+translate(e, delta)     | passes an existing one
+```
+
+Deconstruction is explicit, written as a comma-separated list of targets on the left of a `let` or an assignment.
+
+```
+let div, mod = divmod(10, 3)
+a, b = b, a
+```
+
+Procedures with [Multiple return values](#procedures) produce tuples.
 
 ### Ranges
 
