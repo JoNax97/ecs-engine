@@ -121,7 +121,7 @@ let div, _ = divmod(10, 3)
 
 ### Operators
  
-Mathematical operators define addition ` + `, subtraction ` - `, multiplication ` * `, division ` / ` and remainder ` % `  
+Mathematical operators define addition ` + `, subtraction ` - `, multiplication ` * `, division ` / `, whole-number division ` // ` and modulo ` % `  
 They can be compounded with assignment:
 
 ```
@@ -218,31 +218,6 @@ assert(health.current <= health.max, "Health is over max allowed value")
 
 The `boolean` type is a boolean. What else do you want.
 
-### Numeric Types
-
-There are only two numeric types: `integer` and `decimal`. Width, signedness and precision are not encoded into separate types; they are derived from the declared constraints, so a declaration can be refined by adding an annotation rather than by changing its type.
-
-For integer types, storage width and signedness is inferred from its declared range. For example:
-
-| Declaration                  | Width  | Signed |
-| ---------------------------- | ------ | ------ |
-| `integer health`             | 32-bit | yes    |
-| `integer ammo range(0..999)` | 16-bit | no     |
-
-The language uses fixed-point numbers to allow for fine-grained optimizations, while remaining simple to use for the common case.
-For decimal types, storage width and signedness is inferred from both range and precision.
-
-`precision(n)` is declared in **decimal places**, and accepts `n` up to 5. The Precision column below reports the resulting fractional width.
-
-Storage widths are a guarantee, not an optimizer preference: a declaration that resolves to 16 bits will always be 16 bits, and may be budgeted against — for memory, and for the bandwidth it costs to synchronize. How widths are derived is in the implementation spec.
-
-| Declaration                                          | Width   | Signed | Fractional width |
-| ---------------------------------------------------- | ------- | ------ | ---------------- |
-| `decimal score`                                      | 32-bit  | yes    | 13 bits          |
-| `decimal health range(0..1000)`                      | 24-bit  | no     | 13 bits          |
-| `decimal position range(-10000..10000) precision(5)` | 32-bit  | yes    | 17 bits          |
-| `decimal rotation range(0..360) precision(2)`        | 16-bit  | no     | 7 bits           |
-
 ### Strings
 
 Strings can be either fixed or variable in length. Fixed-length strings are inlined and can be used inside of components.
@@ -331,7 +306,73 @@ end
 when in range(0..5)   | as a match arm
 ```
 
-A declared range narrows storage but does not bound it exactly — `range(-10..100)` resolves to a signed byte, which can hold -128. Writing a value outside the declared range fails. Values never wrap; use `%` where wrapping is the intent. Clamping is available but requires explicit syntax, so it is never what happens by accident.
+A declared range narrows storage but does not bound it exactly — `range(-10..100)` resolves to a signed byte, which can hold -128. Writing a value outside the declared range fails. Ranges do not clamp automatically.
+
+## Numeric Types
+
+There are only two numeric types: `integer` and `decimal`. Width, signedness and precision are not encoded into separate types; they are derived from the declared constraints, so a declaration can be refined by adding an annotation rather than by changing its type.
+
+For integer types, storage width and signedness is inferred from its declared range. For example:
+
+| Declaration                  | Width  | Signed |
+| ---------------------------- | ------ | ------ |
+| `integer health`             | 32-bit | yes    |
+| `integer ammo range(0..999)` | 16-bit | no     |
+
+The language uses fixed-point numbers to allow for fine-grained optimizations, while remaining simple to use for the common case.
+For decimal types, storage width and signedness is inferred from both range and precision.
+
+`precision(n)` is declared in **decimal places**, and accepts `n` from 1 to 5. The Precision column below reports the resulting fractional width.
+
+Storage widths are a guarantee, not an optimizer preference: a declaration that resolves to 16 bits will always be 16 bits, and may be budgeted against — for memory, and for the bandwidth it costs to synchronize. How widths are derived is in the implementation spec.
+
+| Declaration                                          | Width   | Signed | Fractional width |
+| ---------------------------------------------------- | ------- | ------ | ---------------- |
+| `decimal score`                                      | 32-bit  | yes    | 13 bits          |
+| `decimal health range(0..1000)`                      | 24-bit  | no     | 13 bits          |
+| `decimal position range(-10000..10000) precision(5)` | 32-bit  | yes    | 17 bits          |
+| `decimal rotation range(0..360) precision(2)`        | 16-bit  | no     | 7 bits           |
+
+
+### Arithmetic
+
+Arithmetic expressions are computed at full width, and narrowed only where the result is stored, so a long expression does not lose precision. Operations on values of differing precision are computed at the finer precision; neither operand is rounded to meet the other.
+
+Two limits apply, and they are treated differently:
+
+- When an intermediate or a result is short of *fractional* bits, it is computed at the highest precision that does fit.
+- When an intermediate or a result is short of *magnitude* bits, the operation fails.
+
+There are no infinities and no NaNs. Every value a numeric type can hold is a number, so an operation with no representable result fails. Division and modulo by zero fail for both integers and decimals. Comparison is therefore total: `a == a` always holds, and exactly one of `a < b`, `a == b` and `a > b` is true for any pair.
+
+### Division
+
+The language provides two different division primitives that serve different purposes:
+
+- `/`  produces a decimal at full precision even when both operands are integers.
+
+- `//` produces an integer and floors. Its counterpart `%` takes the sign of the divisor. The identity `a == (a // b) * b + a % b` holds at every precision.
+
+```
+1 / 3       | returns 0.333…
+7.5 // 2.0  | returns 3
+-7 // 2     | returns -4
+-1 % 360    | returns 359
+```
+
+`//` is not shorthand for `floor(a / b)`. When division result is negative and falls within a very small fraction of a whole number, `floor` returns a result one too high. Use `//` wherever the whole quotient is the answer being asked for.
+
+### Changing precision
+
+There is no numeric cast syntax. Numeric conversions are rescales the language performs on its own, or explicit math operations.
+
+Storing a decimal value into a decimal field of narrower precision implicitly rounds to nearest. Storing a `decimal` into an `integer` field, however, requires specifying a conversion behavior via `floor`, `round`, `ceil` or `truncate`. These procedures can take their target precision from where the result is stored, or take it explicitly:
+
+```
+integer cell = floor(position / cell_size)
+integer damage = round(base * multiplier)
+decimal coarse = round(position, 2)
+```
 
 ## Program Structure
  
@@ -638,7 +679,7 @@ Multiple return values are declared with a comma-separated, optionally named lis
  
 ```
 define proc divmod(integer a, integer b) returns integer div, integer mod
-    return a / b, a % b
+    return a // b, a % b
 end
 
 | usage

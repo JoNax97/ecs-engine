@@ -16,6 +16,16 @@ Dropping it keeps `.` meaning exactly one thing — reaching into data — and r
 
 The cost is that nested calls read inside-out. `let` bindings name the intermediates instead. If a pipeline style does become common, the answer is a [threading construct](Pending.md#data-modeling-and-declaration-syntax) rather than dot-sugar, so that `.` keeps meaning data.
 
+### Surface unification of `integer` and `decimal`
+
+`integer` is the `f = 0` case of the same representation ([unified representation](Language%20Implementation.md#unified-representation)), so the surface could follow the implementation and collapse to one numeric type — `integer` as sugar for a zero-precision `decimal`.
+
+Not adopted. The unification is worth having internally, where it removes the integer case from scale reconciliation, width inference and overload ranking. On the surface it would buy one type instead of two and cost the only narrowing that is currently visible: assigning a fractional value into a whole-number field would become an ordinary rescale and round silently, in the one place an author most needs to state which rounding they meant. [Changing precision](Language%20Spec.md#changing-precision) makes that conversion explicit instead, which requires the two types to stay distinct.
+
+`precision(0)` is unspellable for the same reason — it would be a `decimal` indistinguishable from an `integer` in representation while following a different conversion rule.
+
+Revisit only if the explicit-conversion rule is dropped. Division does not bear on it either way: `/` and `//` split by intent rather than by operand type.
+
 ---
 
 ## Queries and Predicates

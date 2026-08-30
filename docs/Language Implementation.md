@@ -32,26 +32,69 @@ These widths are a language-level contract; the resulting widths must stay as do
 
 Internally there is one numeric representation: a scaled integer with a fractional width `f`. `integer` is the `f = 0` case of the same form, not a separate kind of value. The two surface keywords differ only in their defaults — `integer` defaults to `f = 0`, `decimal` to `f = 13`.
 
+Every bit pattern of a scaled integer represents a value, so there is no encoding left over for an infinity or a NaN.
+
 Consequences:
 
 - Mixed-precision arithmetic and `integer`-with-`decimal` arithmetic are the same scale-reconciliation rule, not separate conversion paths.
 - Overload resolution ranks candidates by "prefer the smaller scale change".
 - Width and signedness inference is one algorithm over `(range, f)`.
-- Division is one operation parameterized by a compile-time constant: `integer / integer` at `f = 0` truncates; decimal division pre-shifts by `f`.
+- Both `/` and `//` work uniformly across integers and decimals.
 
 The unification is strictly internal. `integer` and `decimal` remain distinct types at the surface.
 
-### Computation
+### Arithmetic
 
 The rules above apply to in-memory storage. Computation expands operands to the maximum width (64-bit). Narrower computation paths are a performance question only, tracked in [Pending](Pending.md#compilation-and-backend).
 
 Rescaling a value to a narrower fractional width rounds to nearest, ties toward positive infinity: `(v + (1 << (f - 1))) >> f`. Truncation is not used — its error is directional, so it accumulates linearly through a chain of operations instead of cancelling.
 
+Operands at differing fractional widths are reconciled by shifting the lower one up to meet the higher. Reconciliation is therefore exact and never rounds.
+
+- `+`, `-` and the comparison operators align both operands to `max(fa, fb)`, and the result carries that width.
+- `*` does not align. The product of operands at `fa` and `fb` has width `fa + fb`, and is rescaled to the target.
+
+All three shapes can exhaust the 64-bit intermediate:
+
+- Aligning an `f = 0` operand to `f = 17` shifts by 17, leaving 46 bits of integer part, so a whole number above roughly 7×10¹³ added to a full-precision decimal overflows on the alignment rather than on the addition.
+- A product needs `fa + fb` fractional bits at once, leaving 29 bits at `f = 17` on both sides. Wasm has no widening 64×64 multiply, so that intermediate gets 64 bits and no more.
+- Division pre-shifts its numerator, covered below.
+
+### Division
+
+`/` evaluates at `f = 17`, and is rescaled at the store. No scale is inferred from the operands or from the destination.
+
+From operands at `fa` and `fb`, the division result is `(A << (17 - fa + fb)) / B`. The shift precedes the divide, so the numerator must survive it in 64 bits; the worst case is `fa = 0, fb = 17`, a 34-bit shift.
+
+The `f = 17` result itself truncates rather than rounds, since that is what the hardware divide does. The residual is below `2^-17` and is not compounded, because the value is rescaled to its destination exactly once.
+
+`//` divides the aligned operands directly and never materializes a fractional result. That is why it is a primitive and not `floor(a / b)`: at `f = 17` an exact result a hair below a whole number is indistinguishable from that whole number, so the compound form is off by one at precisely the boundaries grid arithmetic lands on.
+
+Floor semantics cost a fixup, because `i64.div_s` truncates toward zero and `i64.rem_s` takes the sign of the number being divided. Where the remainder is non-zero and the operands' signs differ, subtract one from the result and add the divisor to the remainder. It is branchless — a sign test, a compare and two conditional adds.
+
+The fixup is elided wherever both operands are proven non-negative, which covers counts, indices and tick arithmetic. It survives where the interval straddles zero: `angle - delta` over two `range(0..360)` fields spans `-360..360`.
+
+`i64.div_s` traps on a zero divisor, so the contract's divide-by-zero failure costs no branch.
+
+### Precision selection
+
+Every operand carries an interval, since an undeclared `integer` is signed 32-bit and an undeclared `decimal` is 32-bit at `f = 13`. A `range` annotation tightens that interval and is never the only source of one, so ordinary unrefined code is provable without annotations: two 32-bit operands aligned to `f = 17` occupy 49 bits.
+
+Where the interval is wide enough that `f = 17` cannot be proven safe, the compiler selects the largest `f` it can prove and emits that as a constant shift. One is always available — at `f = 0` a division's numerator is not shifted and an addition does not align upward. The selection happens at build time, so the shift folds like any other constant and there is no runtime check and no data-dependent shift.
+
+The degradation is silent. The `f` an expression settles on is a compile-time fact and belongs in tooling, per [Show the machinery in motion](Design%20Principles.md#show-the-machinery-in-motion), rather than in a diagnostic.
+
+Shedding precision only answers an intermediate short of *fractional* bits. Where the result's integer magnitude does not fit its destination there is nothing to give up, and it is an ordinary out-of-range write.
+
+The same interval analysis serves division's sign fixup below.
+
 ### Inferred bindings
 
 A `let` binding takes the most generous representation of its inferred surface type: 64-bit, with `f = 0` for `integer` and `f = 17` for `decimal`. Because `precision(n)` caps at `n = 5`, `f = 17` is the widest fractional width any declaration can name, so a `let` binding holds any value read from a declared field without narrowing.
 
-Products set that cap. A multiply produces a `2f` intermediate before rescaling, and Wasm has no widening 64×64 multiply, so the intermediate must fit in 64 bits: `f = 17` leaves 29 bits of integer part. Raising `f` costs that headroom twice over.
+Products set that cap: a multiply's `fa + fb` intermediate is what constrains `f`, and raising it costs that headroom twice over.
+
+A `let` binding's generous representation is a storage decision, not an analysis one. The compiler still propagates an inferred range through the binding, so an expression over declared fields stays statically checkable after passing through a `let`.
 
 ---
 

@@ -166,6 +166,26 @@ The intended model is that the engine builds a DAG from declared dependencies pl
 - Reordering so the name doesn't sit between type and annotations (Jose).
 - Optional fields and the associated bit-packing idea (Jose).
 
+### Numeric annotations on a composite type · `idea` · `3` · `syntax`
+
+`range` and `precision` annotate a single numeric declaration, so there is no way to constrain a `Vector2`, a matrix, or any other composite of numeric fields. Every author of one currently has to annotate each field by hand and keep them in agreement.
+
+Proposed: an annotation on the type declaration supplies the default for its numeric fields, and a field may override it. The same annotation is also accepted at the use site, constraining that particular value.
+
+```
+define value Vector2 precision(2) (
+    decimal x
+    decimal y                 | both take precision 2
+    decimal other precision(5)  | overrides the default
+)
+
+Vector2 v precision(3)        | a precision-3 vector
+```
+
+The use-site form is the consequential half: `Vector2 precision(2)` and `Vector2 precision(3)` have different layouts, so they are different types. Assignment between them is a rescale, and a proc taking a bare `Vector2` is either restricted to one instantiation or must be generic over the annotation and monomorphized per use. That is the same problem as [an array-typed parameter erasing its element representation](#data-modeling-and-declaration-syntax), with `(range, f)` moving from an array's element to a composite's fields — so it shares that entry's resolution and is blocked on [generics](#data-modeling-and-declaration-syntax).
+
+Open beyond that: whether a use-site annotation may override a field that stated its own, or only fields that took the default; whether `range` composes the same way as `precision`, given a range constrains a single scalar's magnitude and a vector's fields may want different ones; and whether this is the same mechanism as [testing against a declaration's own range](#data-modeling-and-declaration-syntax) asking for annotations to be addressable, or merely adjacent to it.
+
 ### Generics and trait/conformance syntax · `pending` · `3` · `syntax`
 
 [Procedure overloading](Language%20Spec.md#procedure-overloading) covers the plain "one name, many types" case, so traits are needed only for generic code.
@@ -239,6 +259,17 @@ Note the breadth pressure. This would be the third `where`-shaped construct alon
 
 An alternative to inheritance: a component declares a dependency on another. Cascade-removal reuses the existing end-of-frame flush pass, the same mechanism as relationship deletion — reuse, not new machinery. No syntax, no semantics for conflicts or diamond cases.
 
+### Numbers wider than 64 bits · `idea` · `1`
+
+If the 64-bit ceiling ever binds, the answer is a separate type rather than raising the `precision(n)` cap or the storage widths. The ceiling is load-bearing: `f = 17` exists because a product's `fa + fb` intermediate must fit 64 bits, `let` generosity is affordable because 64-bit is the widest thing there is, and [precision selection](Language%20Implementation.md#precision-selection) picks its constant shifts against it. Raising it changes the cost of all arithmetic to buy something almost no code needs, and costs the single-artifact property besides, since wasm3 implements neither i128 nor SIMD.
+
+A separate type also makes the cost visible where it is paid, and can be added later without touching anything that exists — where lifting the cap would change every stored width and every intermediate.
+
+Two things to settle first:
+
+- It is an exception to [Numeric Types](Language%20Spec.md#numeric-types), which states that width and precision come from annotations rather than from separate types. The exception is defensible on the grounds that this is a different operation set — native instructions against synthesized multi-instruction sequences with a per-backend cost — rather than a wider storage width, but it has to be argued rather than assumed.
+- "Bigger" is two needs. Enormous magnitude with little precision (idle-game currency, lifetime statistics) wants a floating exponent; more fractional bits than `precision(5)` wants a wider fixed-point type. One type serving both would serve neither well.
+
 ### Bit packing · `idea` · `2`
 
 Three directions to explore, not necessarily together:
@@ -287,7 +318,7 @@ define proc sum(integer[] numbers)
 
 The consistent fix is to make the element representation part of the array's type and generic over it, monomorphized per instantiation — the sized-generic shape sketched in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#arrays-fixed-strings-symbolstags-sized-generics), extended from capacity to `(range, f)`. That makes this blocked on [generics](#data-modeling-and-declaration-syntax).
 
-Note what does *not* need instantiating: [computation expands every operand to 64 bits](Language%20Implementation.md#computation), so there is no per-width arithmetic to emit — only a widening load, a rescale shift, and a narrowing store. A proc body can compile once and specialize its accessors.
+Note what does *not* need instantiating: [computation expands every operand to 64 bits](Language%20Implementation.md#arithmetic), so there is no per-width arithmetic to emit — only a widening load, a rescale shift, and a narrowing store. A proc body can compile once and specialize its accessors.
 
 ### Erased component handles · `pending` · `3`
 
@@ -367,11 +398,13 @@ A component whose only field is named `value` could be readable as that field di
 
 A proc returning `Entity` says nothing about what that entity has, so every caller re-checks. A return type of the form "entity known to have these components" would let the check happen once, at the boundary. Interacts with absence semantics, since such a proc usually also has to express "found nothing".
 
-### Which division is the default · `pending` · `3`
+### Where the rounding operations live · `pending` · `2` · `syntax`
 
-`/` on two integers currently truncates, following the `f = 0` case of [unified representation](Language%20Implementation.md#unified-representation). The alternative is for `/` to always mean real division, with truncating division given a separate spelling.
+[Changing precision](Language%20Spec.md#changing-precision) requires `floor`, `round`, `ceil` and `truncate`, and they are unplaced: language operations, or procedures in [the core API](#core-api). Nothing in the semantics decides it, but the second form has to be expressible by an ordinary signature, and the optional precision argument is the problem — `round(position, precision(2))` passes an annotation as a value.
 
-To be explored from the end user's perspective rather than the implementation's: truncation is the cheaper operation and the one a systems author expects, but it is also a silent precision loss in the case an author is most likely to write by accident, and the type-driven meaning means the same expression changes behaviour when a field's declared type changes. Whichever way it lands, the losing form needs a spelling.
+That is the same question [testing against a declaration's own range](#data-modeling-and-declaration-syntax) asks about `range`, so the two should be answered together. If annotations are never addressable, the precision argument needs a different spelling or the operations are compiler-known.
+
+To review: [Changing precision](Language%20Spec.md#changing-precision) currently spells the argument as a bare `round(position, 2)`, which sidesteps the annotation-as-value problem but makes the second argument a plain number whose unit — decimal places — is implicit. Decide whether that is the intended spelling or a placeholder, since the two forms lead to different answers here.
 
 ---
 
@@ -573,7 +606,7 @@ With the condition first (Jose).
 
 ### Width-specialized computation · `idea` · `2`
 
-[Computation](Language%20Implementation.md#computation) expands operands to 64 bits. Generating variants of math primitives and procs against the widths actually used would cut that, but it is exclusively a performance improvement — the naive path must be correct on its own.
+[Arithmetic](Language%20Implementation.md#arithmetic) expands operands to 64 bits. Generating variants of math primitives and procs against the widths actually used would cut that, but it is exclusively a performance improvement — the naive path must be correct on its own.
 
 ### Host embedding API · `pending` · `5`
 

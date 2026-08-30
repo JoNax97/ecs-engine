@@ -71,6 +71,25 @@ Living artifact. Read it before any design task, and update it in the same pass 
 - -> Reopening the cap depends on static range inference over `(range, f)` deciding per-expression whether a product fits. Same lattice as width inference; not designed.
 - Round-to-nearest on rescale <- truncation's error is directional, accumulating linearly rather than cancelling. Toward-zero is also the most expensive of the three modes in fixed point, since an arithmetic shift floors and negatives need a sign-dependent bias.
 
+**Division** (`#division`)
+- The split is by intent, not by operand type. At `f = 0`, `/` was covering two operations that never coincide: an exact integer partition (index, bucket, count, wrap) and an inexact ratio. Only the second has a precision question, so no rounding policy could reconcile them — one of them is not rounding anything. Splitting by type instead is what made the same expression change meaning when a field's declared type changed.
+- `//` floors rather than truncates, against the C-family expectation the audience actually holds. Full argument in `faq-material.md#why-does--floor`; the short form is that floor and truncation agree on every non-negative use (counts, indices, ticks) and disagree only on spatial arithmetic, where truncation is a bug. The choice is invisible where it is free and correct where it is visible.
+- `//` is a primitive, not sugar for `floor(a / b)` <- the `f = 17` intermediate cannot distinguish an exact division result from one a hair below it, so the compound form is off by one at exactly the grid boundaries. Peculiar to fixed point; Python has no such gap because its integer division is exact.
+- `%` takes the divisor's sign because the identity `a == (a // b) * b + a % b` links it to `//`. Not an independent choice. Rejected: a second pair (`rem`/`rem_euclid` style) — `/` has no remainder to pair with, since a fractional division result is exact, so only one whole division exists to take one.
+- `/` targets a fixed `f = 17` rather than deriving one from the operands. Rejected: `max(fa, fb)`, which is the SQL `DECIMAL` family's rule and inherits its hole — two whole operands give `f = 0`, so `1 / 3` is `0`. SQL patches this with an arbitrary significant-digit floor and the engines disagree on the constant.
+- Also rejected: deriving the scale from the destination (Ada's `universal_fixed`, `BigDecimal.divide` refusing without an explicit scale). Correct in spirit, but a chained expression like `(a / b) * c` has to push the required scale backwards through the tree, and the multiply rule `fa + fb` admits many splits that land on the same destination. A fixed `f = 17` reaches the same observable answer with no inference, and reuses the constant `#inferred-bindings` already fixed.
+- -> The precedent worth remembering: every fixed-point system with a genuine choice refuses to infer a scale for the division result. Only SQL picks, and its rule is the one regarded as a wart.
+- Precision degradation is decided at compile time and is silent. Runtime detection was rejected twice over: it costs a check and a data-dependent shift on every unproven operation, and the build-independence it was defended on (`Engine Core.md#frame-model-and-synchronization` — a build-dependent arithmetic result desyncs peers) comes free once the shift is baked into the artifact.
+- Silent rather than warned <- numeric refinement is optional (`Language Spec.md#numeric-types`), and a warning whose remedy is "add a `range`" converts an optional annotation into one written to quiet the compiler. Floating point loses precision continuously without complaint; the difference here is that the amount lost is a compile-time fact, so tooling can show it on request (`Design Principles.md#show-the-machinery-in-motion`).
+- Unrefined code is provable anyway <- storage defaults are intervals. Undeclared `integer` is signed 32-bit, undeclared `decimal` is 32-bit at `f = 13`, so `range` tightens an interval that already exists. The unprovable residual is values genuinely unbounded by their storage, not values merely unannotated.
+- Store-time range checking cannot substitute for the pre-shift check: an overflowed intermediate can land back inside the destination's range, so the store never sees it.
+
+**No infinity or NaN** (`Language Spec.md#arithmetic`)
+- Not a design choice so much as an absence of anywhere to put them: a scaled integer reserves no bit patterns, where IEEE 754 spends an exponent value on them. The alternative to halting is a silently wrong number, not a placeholder.
+- Worth stating explicitly despite reading as obvious <- integer division by zero errors in every language, but *float* division by zero does not, and the audience arrives from float-based engines where `x / 0` yields `Infinity` and the frame continues. The departure is from their daily experience, not from a language rule.
+- -> Comparison is total, which the equality pass can rely on: no `NaN != NaN` case to special-case in sorting, deduplication or cached comparisons.
+- -> A silently wrong value is worse here than a halt, since state is bulk-synchronized and a wrong number desyncs peers rather than reporting itself.
+
 ---
 
 ## Language Spec
@@ -80,6 +99,12 @@ Living artifact. Read it before any design task, and update it in the same pass 
 - `let` carries no annotations <- it means "representation does not matter", which is only honest where the generous representation is free. That is true of a stack slot and false of storage.
 - -> `let` is banned at the top level. Same premise: file state is laid-out storage, so the generosity has no basis there. Reverse the premise and the ban goes with it.
 - File-level variables are declared like fields, but bare variable-size data is dynamically backed rather than annotated, because `dynamic` opts a *field* out of inline storage and there is no enclosing layout at file scope.
+
+**Changing precision** (`#changing-precision`)
+- The line is the declared type keyword, not lossiness. Precision narrowing within `decimal` is lossy too and stays implicit; what earns explicitness is crossing to `integer`, because that is what an author reads at the use site.
+- No cast syntax at all <- a cast-shaped spelling imports C's truncation semantics, and neither of this language's conversions truncates: the implicit rescale rounds to nearest and `//` floors. Three behaviours in play, so the operation is named rather than defaulted.
+- -> Forces `precision(0)` to be unspellable, or the same representation would follow two conversion rules depending on which keyword declared it (`Shelved.md#data-modeling-and-declaration-syntax`).
+- Making all narrowing explicit was rejected: storing a wide expression into a declared field is how ordinary arithmetic terminates, so requiring a wrapper there makes routine code unwriteable.
 
 **File state is non-persistent** (`Engine Core.md#memory-tiers`)
 - <- Unmanaged memory sits outside every memory block, and the frame model synchronizes memory blocks. Non-sync and non-serialization are consequences of the tier, not separate rules.
