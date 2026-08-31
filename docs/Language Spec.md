@@ -130,7 +130,7 @@ n *= t
 ```
 There are no unary increment/decrement operators (` ++ -- `).
 
-Comparison operators define equality ` == `, inequality ` != `, and arithmetic comparisons ` < <= > >= `
+Comparison operators define equality ` == `, inequality ` != `, and relational comparisons ` < <= > >= `. See [Comparison semantics](#comparison-semantics) for the specifics of each type.
 
 - Boolean: `and`, `or`, `not`
 - Presence: `has`, `has no`, `has not`
@@ -162,6 +162,17 @@ end
  ```
 
 The `match` statement evaluates an expression against a set of patterns, running the block for the first match. 
+
+Each `when` arm is a comparison whose left operand is the match subject and is therefore omitted: `when <= 0` tests the subject against zero, and `when in range(0..5)` tests it for membership. The right operand must be a [constant](#constants) expression.
+
+The operator may be omitted too, in which case the arm is the equality test its operand's type calls for — `==` for a value, `is` for an [enum](#enums) label.
+
+```
+when 5          | same as when == 5
+when Stun       | same as when is Stun
+```
+
+Arms are tested in declaration order, so ordering is semantic and overlapping arms are allowed. Exhaustiveness is not required; where no arm matches and there is no `else`, nothing runs.
 
 ```
 match health
@@ -228,6 +239,8 @@ string tag length(16)  | Fixed-length string
 ```
 
 Inside a `define`d type, a `string` must state its storage: either a `length(n)`, or `dynamic`. See [Storage](#storage).
+
+`length(n)` counts characters, not bytes.
 
 Strings can be interpolated by inserting arguments using `$`. Add parenthesis for more complex expressions:
  
@@ -296,17 +309,9 @@ Procedures with [Multiple return values](#procedures) produce tuples.
 
 A range constraining a numeric type must include zero. Data is always zero-initialized, so a range that excluded it would declare its own starting value impossible. `range(-10..100)` is fine; `range(1..999)` is not, and costs nothing to widen, since both spellings resolve to the same storage width.
 
-The `in` operator tests membership, and takes a range as its right operand.
-
-```
-if damage in range(0..100)
-    ...
-end
-
-when in range(0..5)   | as a match arm
-```
-
 A declared range narrows storage but does not bound it exactly — `range(-10..100)` resolves to a signed byte, which can hold -128. Writing a value outside the declared range fails. Ranges do not clamp automatically.
+
+---
 
 ## Numeric Types
 
@@ -463,23 +468,19 @@ end
  
 In this language, data and behavior are modeled directly as ECS primitives. All declarations in this section are introduced with the `define` keyword. 
 
-Many data types declare fields or arguments. These are declared in parentheses and are comma-separated. 
-  
-Fields cannot declare default values, and are always zero-initialized. 
+Many data types declare fields or arguments. These are declared in parentheses and are comma-separated. Fields cannot declare default values, and are always zero-initialized. 
 
-Every type is either a value or a handle, and that decides what an identifier naming it does.
+Every data-carrying type has either value or handle semantics, which decides how it is assigned:
 
-- A **value** is copied on assignment. Two identifiers never name the same value, and writing through one cannot be observed through another.
-- A **handle** refers to data the runtime owns. Entities and components are handles. Assignment copies the handle, not the data, so two identifiers may name the same data and a write through either is visible through both.
-
-Handle data is not addressable outside the frame it is used in. A handle may not be stored in a component, in file state, or held across a frame boundary, so a handle can never refer to data that no longer exists.
+- A **value** is plain data with no ownership. It is copied on assignment, so two identifiers never refer to the same data.
+- A **handle** is shared data owned by the runtime. It is referenced on assignment, so two identifiers may refer to the same data. They also can have identity semantics for [equality comparisons](#comparison-semantics).
  
-### Values
+### Records
  
-A `value` is a plain aggregate type. It is copied on assignment and is not directly addressable.  
+A `record` is a plain aggregate type. It has value semantics, and is not directly addressable.  
 
 ```
-define value Vector3 (
+define record Vector3 (
     integer x,
     integer y,
     integer z
@@ -488,7 +489,7 @@ define value Vector3 (
   
 ### Components
  
-A `component` is the unit of data an entity. Components are query-able and independently addressable. 
+A `component` is the unit of data of an entity. It has handle semantics, is query-able, and is addressable through its entity. 
 
 ```
 define component Health (
@@ -499,7 +500,7 @@ define component Health (
  
 ### Tags
  
-A `tag` is a special kind of component with no data, only presence.
+A `tag` is a special kind of component with no data. It is neither a value nor a handle: it cannot be bound, assigned or passed. It can only be tested for presence.
 
 ```
 define tag Stunned
@@ -507,8 +508,8 @@ define tag Stunned
  
 ### Enums
  
-An `enum` is a closed set of named labels. Labels optionally may have one more fields.
-Each label also has numeric value derived from its declared order. The first label is the default one and always equals zero.
+An `enum` is a closed set of named labels with value semantics. 
+Labels are ordered by their declaration. The first label is the default; a zero-initialized enum holds it. Labels optionally may have one or more fields.
 
 ```
 define enum Effect (
@@ -516,6 +517,12 @@ define enum Effect (
     Stun,
     Heal(integer amount range(0..1000), Entity source)
 )
+```
+
+An enum may be declared `ordered`, which makes relational comparisons available on it. Ordering compares the label first, by declaration order, and then the payload fields. An ordered enum requires every payload field to be itself orderable.
+
+```
+define enum Severity (Info, Warning, Error) ordered
 ```
 
 Enums can be pattern-matched using `match` statements. A label's fields are accessed by binding the label to an identifier:
@@ -586,12 +593,29 @@ define relationship Likes (
  
 Transitive, ephemeral and exclusive relationships are unspecified; see [Pending](Pending.md#relationships).
 
+### Construction
+
+Types are constructed simply by using the type identifier. There is no `new` operator. 
+
+Field values can be passed positionally or by name. Named values must always be passed after positional ones.
+Parens are optional when no values are assigned.  Values not passed are initialized with their zero values. 
+ 
+```
+let v = Vector3 | Same as Vector3()
+
+v = Vector3(1, 2, 3)
+
+let w = Weapon(damage: 10, ammo: 100)
+
+let l = Label(text, size, alignment: Alignment.Left)
+```
+
 ### Visibility
  
 Every `define` may be accompanied by a visibility keyword:
  
 ```
-define private value HelperStruct(...)
+define private record HelperData(...)
 ```
 
 | Keyword    | Scope                                              |
@@ -601,7 +625,7 @@ define private value HelperStruct(...)
 | `public`   | Visible to other modules, via import               |
 
 Defaults differ by category, following ECS principles:
-- Data declarations (values, components, enums, etc) default to `public`. 
+- Data declarations (records, components, enums, etc) default to `public`. 
 - Behavior and state declarations (procedures, variables, queries) default to `private`.  
 - No declarations default to `internal`. 
 
@@ -612,14 +636,14 @@ Fields inside defined types are inlined by default. Most types have a fixed size
 `dynamic` opts a field out of inline storage. The field's storage is then managed by the runtime and the field holds a reference to it. This is transparent for the user but must be spelled out because it's more costly than the inline form.
 
 ```
-define value Label (
+define record Label (
     string text length(32),    | inline
     string body dynamic        | separately stored, costlier
 )
 ```
 
  > [!IMPORTANT]
- > Dynamic data is allowed only at a component top level. A `value` with a `dynamic` field cannot be used inside a component; hoist the field to the component itself.
+ > Dynamic data is allowed only at a component top level. A `record` with a `dynamic` field cannot be used inside a component; hoist the field to the component itself.
 
 Proc arguments and variables declared outside of defined types are not inlined by default. A bare string or array is dynamically backed and no annotation is needed.
 
@@ -631,21 +655,41 @@ define proc sum(integer[] numbers)  | Argument can receive both dynamic and fixe
 end
 ```
 
-### Construction
+### Comparison semantics
 
-Types are constructed simply by using the type identifier. There is no `new` operator. 
+`==` and `!=` compare two operands of the same type. Comparing across types is an error. Equality is either **structural** (determined by the operands' contents) or by **identity** (determined by whether both identifiers reference the same data). Only [handles](#data-modeling) can be compared by identity.
 
-Field values can be passed positionally or by name. Named values must always be passed after positional ones.
-Parens are optional when no values are assigned.  Values not passed are initialized with their zero values. 
- 
+| Type                             | Comparison semantics               |
+| -------------------------------- | ---------------------------------- |
+| numeric, `boolean`, `string`     | Value equality                     |
+| `record`                         | Structural, memberwise             |
+| `component`, `relationship`      | Structural, memberwise             |
+| `tuple`, arrays                  | Structural, elementwise            |
+| entity                           | Identity                           |
+| `enum`                           | Structural, over label and payload |
+
+
+Even though components are handle types, they are compared structurally rather than by identity. A `tag` has no value form at all, so it is never an operand of a comparison.
+
+Two entities are equal when they are the same entity. A destroyed entity is never equal to one created in its place.
+
+An array's element type is checked at compile time and a mismatch is an error. Length and contents are compared at run time.
+
+Relational comparisons apply to numeric types and `ordered` enums. No other type is relationally comparable.
+
+### Membership semantics
+
+The semantics of the `in` operator vary depending on the type of the collection.
+
+- Over a range, the test is against its bounds.
+- Over an array, it is element equality across the array's contents.
+- Over a string, it is containment of a substring, not membership of an element.
+- Over a multi-target relationship, it is whether the entity is one of its targets.
+
 ```
-let v = Vector3 | Same as to Vector3()
-
-v = Vector3(1, 2, 3)
-
-let w = Weapon(damage: 10, ammo: 100)
-
-let l = Label(text, size, alignment: Alignment.Left)
+if damage in range(0..100) ...
+if entity in parent.Children ...
+if "error" in log_message ...
 ```
 
 ---

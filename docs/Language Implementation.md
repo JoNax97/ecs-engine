@@ -148,7 +148,7 @@ The spec bars a constant assigned from a load-time conditional from determining 
 
 ### Flat-copyable taint
 
-[The flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) disqualifies any component holding a `dynamic` field below its top level. Eligibility is decided the same way: a `dynamic` field taints the `value` containing it, and the taint propagates outward to whatever holds that `value`.
+[The flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) disqualifies any component holding a `dynamic` field below its top level. Eligibility is decided the same way: a `dynamic` field taints the structure containing it, and the taint propagates outward to whatever holds that `record`.
 
 The offending field path is stored alongside the taint at declaration time, so reporting a failure does not require re-walking the type.
 

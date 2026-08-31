@@ -43,10 +43,6 @@ Unmanaged memory is never synchronized and never serialized. State that has to c
 
 Everything reachable inside a component must survive being copied verbatim to another address space. An offset into engine-owned memory does; a raw pointer does not.
 
-Eligibility is decided by taint propagation: a `dynamic` field taints the `value` containing it, and the taint propagates outward to disqualify any component holding it. Dynamic data is therefore permitted only at a component's top level.
-
-Enums are flat-copyable by construction — an enum is laid out at the size of its largest variant plus its discriminant, so its size is fixed at declaration.
-
 ---
 
 ## Frame Model and Synchronization

@@ -42,9 +42,11 @@ The author expresses facts about the game; the compiler derives the technical co
 
 Defaults make the safe and correct path the easy path. The best option should also be the default, the easiest or most obvious one.
 
-### No hidden control flow, no implicit costs
+### No hidden costs
 
 Nothing executes that the author did not ask for, and nothing expensive looks free. Where something is expensive, destructive or dangerous, it should be explicit and hard to reach.
+
+A cost derived from a data structure's nature is not hidden; the author is expected to know what their own data costs to traverse. What is to be avoided is cost that varies for reasons the code does not show.
 
 ### Readable by non-engineers
 
