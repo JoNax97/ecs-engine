@@ -6,6 +6,22 @@ It describes intent, not mechanism. How a principle is delivered belongs in the 
 
 ---
 
+## Clean, clear, smooth
+
+Three qualities the design is judged on. The principles that follow are the specific commitments they produce, and are read as instances of them rather than as an unordered list.
+
+**Clean** is about what is present: nothing in the text that does not carry meaning — no ceremony, no decoration, no redundant marks. The test is whether removing it loses anything.
+
+**Clear** is about what it means: one reading, and that reading is the true one, cost included. The test is whether a reader can say what a construct does and what it costs without looking elsewhere.
+
+**Smooth** is about reading motion: no snags, no special cases to stop on, a shape that holds across contexts. The test is whether the eye stops.
+
+When they conflict, the order is **clear, then smooth, then clean**. Clarity is never traded away: a construct that reads well but hides its meaning or its cost is rejected. Smoothness outranks cleanliness, so a second spelling is admissible where it makes a construct read correctly. Cleanliness is the tiebreaker rather than a trump — it is the quality the writer notices most and the reader notices least.
+
+Note that none of the three is brevity. Length is not a cost here; friction is.
+
+---
+
 ## Engine
 
 ### ECS focused
@@ -56,6 +72,14 @@ The language should be legible to designers and modders, not only to programmers
 
 The language stays small by declining features rather than accommodating them. Provide handy features for the common case, and building blocks for the uncommon one. 
 Reuse syntax and mechanisms across contexts when possible.
+
+### Compose constructs, not values
+
+Where a capability can be had by putting existing constructs together, that is preferred to introducing a new one. A construct that exists to remove ceremony from a pattern already expressible is a second spelling, and is declined.
+
+An annotation refines a declaration; it does not change what the declaration is. A capability that changes what a thing fundamentally is, what it represents, or how it behaves earns a kind and a keyword. Everything else is an annotation on a kind that already exists.
+
+The composition meant here is syntactic: constructs nest within one another and resolve at compile time, so combining them costs nothing at run time. It is not composition of values. Chaining operations that each yield an intermediate result is materialization, and is refused for the reason below. The two go by the same name and have opposite costs.
 
 ### No general indexing or materialization
 

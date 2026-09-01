@@ -14,7 +14,25 @@ Each entry records what was proposed, why it was rejected, and what would have t
 
 Dropping it keeps `.` meaning exactly one thing — reaching into data — and removes the need for a lookup rule between component types and procedures on an entity, which would have made the advisory casing convention load-bearing.
 
-The cost is that nested calls read inside-out. `let` bindings name the intermediates instead. If a pipeline style does become common, the answer is a [threading construct](Pending.md#data-modeling-and-declaration-syntax) rather than dot-sugar, so that `.` keeps meaning data.
+The cost is that nested calls read inside-out. `let` bindings name the intermediates instead.
+
+### Pipe syntax
+
+A left-to-right spelling for nested calls, so `clamp(get_magnitude(effect), 0, 1)` reads in application order. Leading candidate was a `then` keyword piping into the first parameter, with every step written as a call whose first argument is missing:
+
+```
+let m = effect then get_magnitude() then clamp(0, 1)
+```
+
+Purely syntactic — it would desugar to the same nested calls, with no runtime cost and no effect on overload resolution or access-set extraction. The empty parentheses were load-bearing: they keep a step a call, so the rule that a bare name in argument position is a reference needs no exception. `|>` was rejected on spelling, since `|` is the comment character.
+
+Not adopted, and now decided by principle rather than by taste: it is a second spelling for a construct that already has one, which [Compose constructs, not values](Design%20Principles.md#compose-constructs-not-values) declines. It differs from dot-sugar above in not implying that data owns behaviour, but that only clears one objection, not the main one.
+
+The costs recorded against it, worth keeping because they apply to any future variant: the call site stops showing real arity, since `get_magnitude()` reads as zero-argument but is one and `clamp(0, 1)` reads as two but is three — Elixir pays the same cost. Piping only into the first parameter constrains library design, since a procedure must be written subject-first to be pipeable. And a chain mixing pure transformations with mutating steps reads as one flowing transformation while half of it is a side effect, which would have forced steps to be restricted to side-effect-free procedures and made this depend on [inferred procedure purity](Pending.md#systems-scheduling-and-parallelism).
+
+Prior art splits on where the piped value lands: Elixir, F# and OCaml insert it as the first argument by convention; Clojure has two operators for first and last; Hack and R use an explicit placeholder token, stating the position at the call site rather than relying on convention.
+
+Revisit if inside-out reading of nested calls becomes a measured pain rather than an anticipated one — ECS bodies mutate fields more than they transform values, so the pipeline case may simply be rare here. Note that shelving this leaves that cost with no live answer, which is deliberate. `then` is consequently free, and the [alternative ternary syntax](Pending.md#errors-and-control-flow) entry now wants it.
 
 ### Surface unification of `integer` and `decimal`
 
@@ -25,6 +43,29 @@ Not adopted. The unification is worth having internally, where it removes the in
 `precision(0)` is unspellable for the same reason — it would be a `decimal` indistinguishable from an `integer` in representation while following a different conversion rule.
 
 Revisit only if the explicit-conversion rule is dropped. Division does not bear on it either way: `/` and `//` split by intent rather than by operand type.
+
+### Numbers wider than 64 bits
+
+Raising the 64-bit ceiling — a higher `precision(n)` cap, or wider storage widths — so that larger magnitudes or finer fractions become expressible.
+
+Not adopted, and not a current need. The ceiling is load-bearing rather than arbitrary: `f = 17` exists because a product's `fa + fb` intermediate must fit 64 bits, `let` generosity is affordable only because 64-bit is the widest thing there is, and [precision selection](Language%20Implementation.md#precision-selection) picks its constant shifts against it. Raising it changes the cost of all arithmetic to buy something almost no code needs, and costs the single-artifact property besides, since wasm3 implements neither i128 nor SIMD.
+
+The ruling if the need ever appears: a **separate type**, not a wider default. That makes the cost visible where it is paid and can be added without touching anything that exists, where lifting the cap would change every stored width and every intermediate.
+
+Two things that would have to be settled at that point, recorded so they are not re-derived:
+
+- It is an exception to [Numeric Types](Language%20Spec.md#numeric-types), which states that width and precision come from annotations rather than from separate types. The exception is defensible on the grounds that this is a different operation set — native instructions against synthesized multi-instruction sequences with a per-backend cost — rather than merely a wider storage width, but it has to be argued rather than assumed.
+- "Bigger" is two needs. Enormous magnitude with little precision (idle-game currency, lifetime statistics) wants a floating exponent; more fractional bits than `precision(5)` wants a wider fixed-point type. One type serving both would serve neither well.
+
+Revisit when the ceiling actually binds in real code — not before, since the shape of the answer depends on which of the two needs shows up first.
+
+### Comparing the labels of two runtime enum values
+
+`is` tests a label but requires a literal on the right, so "do `a` and `b` carry the same label, whatever it is" has no spelling.
+
+Not adopted, and recorded as an accepted hole rather than a rejected proposal — no spelling was designed, because the need has not appeared. Most of what the operation would serve is already covered: sorting and grouping by kind fall out of [`ordered`](Language%20Spec.md#enums) comparing the label first, and the named case is `is` itself. What is left is deduplicating by kind.
+
+Revisit if a confirmed deduplicate-by-kind case appears, which in practice means effects or similar enums being held in a list — undesigned, and the thing to watch for.
 
 ---
 
@@ -47,6 +88,8 @@ Rejected because a registration capturing an enclosing binding is a closure, and
 What it was reaching for is already expressible: adding a marker component *is* the subscription, and a static query over that marker *is* the handler. That form is data rather than code, so it copies, syncs, survives reload, and is idempotent by construction — the component is present or absent, never registered twice. Removing the marker is the `once`.
 
 Worth revisiting only in the restricted form where capture is limited to a single entity binding. The captured environment is then exactly a marker component, and the construct becomes a static transform rather than a runtime registration. Open even then: what the generated component is called, whether it is author-visible, and whether the saved locality is worth a construct at all.
+
+The capture-free degenerate case — "run this once, later", with nothing captured, for deferring expensive cleanup past the current point — is rejected too, and on different grounds (Joaquin, 2026-08-31). Capture was never the objection to it: with nothing captured, what persists is one compile-time-sized flag per deferral site, no allocation and no runtime table, so the cost argument above does not reach it. It is rejected because execution is linear. A body runs to completion and nothing resumes it, which is what [no asynchronous execution](Language%20Spec.md#non-goals) states; a deferral point is a suspension wearing different syntax. Where the work belongs to an entity, the marker-plus-query form above already covers it.
 
 ---
 

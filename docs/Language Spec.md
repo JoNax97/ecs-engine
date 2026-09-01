@@ -816,6 +816,14 @@ let e = create Entity with
 ```
 
 The `with` list may be wrapped in parentheses, but the form above is idiomatic. A component taking no arguments drops its empty parentheses, so `Position` and `Position()` are the same.
+
+Many entities are created at once by giving a count. The count is any integer expression, and the result is an array of the created entities.
+
+```
+let batch = create Entity[count] with Position, Velocity
+```
+
+The `with` list is evaluated once and shared, so every entity in the batch is created identical. Data that differs per entity is written afterwards by iterating the result.
  
 ### Component Access
 
@@ -871,7 +879,7 @@ for
 where
     distance(attacker.Position, target.Position) <= attacker.Weapon.range and
     attacker.Faction != target.Faction and 
-    not target has Shield
+    target has no Shield
 do
     let h = target.Health
     h.current = h.current - attacker.Weapon.damage

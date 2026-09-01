@@ -45,7 +45,9 @@ The unification is strictly internal. `integer` and `decimal` remain distinct ty
 
 ### Arithmetic
 
-The rules above apply to in-memory storage. Computation expands operands to the maximum width (64-bit). Narrower computation paths are a performance question only, tracked in [Pending](Pending.md#compilation-and-backend).
+The rules above apply to in-memory storage. Computation expands operands to the maximum width (64-bit).
+
+Narrower computation paths are a performance question only. Generating variants of the math primitives and of procedures against the widths actually used would cut the expansion, but the 64-bit path has to be correct on its own, so this is an optimization over a complete implementation rather than a decision the language waits on.
 
 Rescaling a value to a narrower fractional width rounds to nearest, ties toward positive infinity: `(v + (1 << (f - 1))) >> f`. Truncation is not used — its error is directional, so it accumulates linearly through a chain of operations instead of cancelling.
 
