@@ -108,7 +108,7 @@ A `const` may appear at the top level or inside any block. Constants cannot be g
 ```
 const max_inventory = 30
 
-integer slots[max_inventory]
+Fixed(integer, max_inventory) slots
 ```
 
 ### Discards
@@ -231,16 +231,14 @@ The `boolean` type is a boolean. What else do you want.
 
 ### Strings
 
-Strings can be either fixed or variable in length. Fixed-length strings are inlined and can be used inside of components.
+A string is a sequence of characters. It has no declared bound, and its characters are always stored [externally](#storage): the runtime owns them and a string holds a reference to them.
 
 ```
-string name = "Loom"   | Variable-length string
-string tag length(16)  | Fixed-length string
+string name = "Loom"
+define record Text (string value)
 ```
 
-Inside a `define`d type, a `string` must state its storage: either a `length(n)`, or `dynamic`. See [Storage](#storage).
-
-`length(n)` counts characters, not bytes.
+Strings are immutable. A string is written as a literal, an interpolation, or by assigning another string, and is never edited in place. There is no concatenation operator; ` + ` is [arithmetic](#operators) only.
 
 Strings can be interpolated by inserting arguments using `$`. Add parenthesis for more complex expressions:
  
@@ -249,21 +247,39 @@ Strings can be interpolated by inserting arguments using `$`. Add parenthesis fo
 "Damage: $(max(weapon.damage, 999))"    | parenthesized, arbitrary expression
 ```
 
-### Arrays
- 
-An array is declared with a trailing bracket on the field name:
- 
-```
-integer slots[30]    | bounded, inline, no allocation
-integer slots[]      | unbounded, dynamically backed
-```
+### Collections
 
-Inside a `define`d type, an array must state its storage: either a bound, or `dynamic`. See [Storage](#storage).
+There are two collection types. They differ in whether the number of elements can change.
 
-An array literal is a bracketed, comma-separated list of values of a single type. Its bound is the number of elements written.
+`Fixed(T, n)` holds exactly `n` elements of type `T`. The count is part of the type, so `Fixed(integer, 3)` and `Fixed(integer, 4)` are different types, and every index below `n` is always valid.
+
+`List(T)` holds a varying number of elements. `capacity(n)` bounds it; without one it is unbounded. A zero-initialized list is empty.
 
 ```
-let scores = [10, 20, 30]    | integer[3]
+Fixed(decimal, 16) transform         | exactly 16 decimals
+List(Item) inventory capacity(30)    | up to 30 items, empty to start
+List(Vector3) targets                | unbounded
+```
+
+An element's own annotations sit with the element type, inside the parentheses:
+
+```
+Fixed(integer range(0..999), 8) buckets
+```
+
+Collections have [handle semantics](#data-modeling); binding one references it. Storage and semantics are independent: a collection stored inline is still referenced when bound.
+
+```
+let s = inv.slots      | references the collection
+s[0] = 5               | writes through to inv.slots
+s = other              | repoints s, inv.slots is unaffected
+inv.slots = other      | copies the contents into the field
+```
+
+Elements are read and written through a bracketed index. A collection literal is a bracketed, comma-separated list of values of a single type, and takes the `Fixed` type its element count implies.
+
+```
+let scores = [10, 20, 30]    | Fixed(integer, 3)
 ```
 
 ### Tuples
@@ -474,7 +490,11 @@ Every data-carrying type has either value or handle semantics, which decides how
 
 - A **value** is plain data with no ownership. It is copied on assignment, so two identifiers never refer to the same data.
 - A **handle** is shared data owned by the runtime. It is referenced on assignment, so two identifiers may refer to the same data. They also can have identity semantics for [equality comparisons](#comparison-semantics).
- 
+
+Assignment writes what the left side denotes. A handle-typed variable holds the handle, so assigning to it repoints the variable. A field names storage, so assigning to it writes contents.
+
+An author therefore cannot install a handle into stored data. Every reference held inside a component or a field is made by the runtime; a script can change what it points at only by writing through it.
+
 ### Records
  
 A `record` is a plain aggregate type. It has value semantics, and is not directly addressable.  
@@ -631,26 +651,32 @@ Defaults differ by category, following ECS principles:
 
 ### Storage
  
-Fields inside defined types are inlined by default. Most types have a fixed size so this is not an issue. However, for types that might have a dynamic size, like strings and arrays, the user must specify a fixed size or explicitly mark them as `dynamic`.
+A collection field is stored one of two ways. **Inline** puts the elements inside the enclosing type, contributing to its size. **External** gives the elements to the runtime, and the field holds a reference to them.
 
-`dynamic` opts a field out of inline storage. The field's storage is then managed by the runtime and the field holds a reference to it. This is transparent for the user but must be spelled out because it's more costly than the inline form.
+The two trade opposite kinds of locality, and which one wins depends on how the data is read:
+
+- **Inline** reaches elements with no indirection, and they are already in cache once the enclosing component is. Right when the collection is read on most iterations, or is small.
+- **External** keeps the component small, so a query walking many components fits more of them in cache. Right when the component is visited far more often than the collection is touched.
+
+Unstated, placement follows capacity: a collection small enough is inline, and anything larger is external. An unbounded collection is always external, since there is no size to inline. Either placement can be stated explicitly to override the default.
+
+[Strings](#strings) have no placement to choose. They are always external, so a component reaches its text through a reference.
 
 ```
-define record Label (
-    string text length(32),    | inline
-    string body dynamic        | separately stored, costlier
+define component Label (
+    List(Item) items capacity(8),          | inline by default
+    Fixed(decimal, 1024) table external    | forced out of line
 )
 ```
 
- > [!IMPORTANT]
- > Dynamic data is allowed only at a component top level. A `record` with a `dynamic` field cannot be used inside a component; hoist the field to the component itself.
+External data may appear at any depth. A `record` holding an external field, or a string, can be used inside a component like any other; each external field costs what an external field costs, wherever it sits.
 
-Proc arguments and variables declared outside of defined types are not inlined by default. A bare string or array is dynamically backed and no annotation is needed.
+Outside a defined type there is no enclosing layout to sit in, so placement does not apply and neither annotation is accepted.
 
 ```
-string text  | Dynamically sized by default
+string text                            | no placement to state
 
-define proc sum(integer[] numbers)  | Argument can receive both dynamic and fixed arrays
+define proc sum(List(integer) numbers)
     ...
 end
 ```
@@ -664,16 +690,16 @@ end
 | numeric, `boolean`, `string`     | Value equality                     |
 | `record`                         | Structural, memberwise             |
 | `component`, `relationship`      | Structural, memberwise             |
-| `tuple`, arrays                  | Structural, elementwise            |
+| `tuple`, collections             | Structural, elementwise            |
 | entity                           | Identity                           |
 | `enum`                           | Structural, over label and payload |
 
 
-Even though components are handle types, they are compared structurally rather than by identity. A `tag` has no value form at all, so it is never an operand of a comparison.
+Even though components and collections are handle types, they are compared structurally rather than by identity. A `tag` has no value form at all, so it is never an operand of a comparison.
 
 Two entities are equal when they are the same entity. A destroyed entity is never equal to one created in its place.
 
-An array's element type is checked at compile time and a mismatch is an error. Length and contents are compared at run time.
+A collection's element type is checked at compile time and a mismatch is an error. Element count and contents are compared at run time.
 
 Relational comparisons apply to numeric types and `ordered` enums. No other type is relationally comparable.
 
@@ -778,7 +804,7 @@ A signature declares a named parameter list and return type, so that a procedure
 ```
 define signature ItemComparison(Item a, Item b) returns boolean
 
-define proc sort(Item items[], ItemComparison before)
+define proc sort(List(Item) items, ItemComparison before)
     ...
 end
 

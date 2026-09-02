@@ -62,7 +62,6 @@ State is synchronized between peers as per-frame chunk copies. A peer either own
 
 - Storage model, and the memory layout that follows from it — [Pending](Pending.md#storage-and-memory-layout).
 - Entity identity and generation — [Pending](Pending.md#storage-and-memory-layout).
-- Addressability of a `dynamic` component field — [Pending](Pending.md#storage-and-memory-layout).
 - Storage for pointer-like component data (ECS-managed buffers) — [Pending](Pending.md#storage-and-memory-layout).
 - Copy granularity and the synchronization path: memory block selection, delta compression, peer topology — [Pending](Pending.md#storage-and-memory-layout).
 - Systems, dependency declaration and DAG construction — [Pending](Pending.md#systems-scheduling-and-parallelism).

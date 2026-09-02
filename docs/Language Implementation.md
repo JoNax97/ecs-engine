@@ -148,11 +148,15 @@ Two separate things, and only the first is a contract.
 
 The spec bars a constant assigned from a load-time conditional from determining a layout. The front end therefore carries a taint bit on constant bindings — set when the initializer reads module presence, propagated through any constant derived from it — and checks it wherever a value feeds an array bound, range constraint, or enum value.
 
-### Flat-copyable taint
+### Storability taint
 
-[The flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) disqualifies any component holding a `dynamic` field below its top level. Eligibility is decided the same way: a `dynamic` field taints the structure containing it, and the taint propagates outward to whatever holds that `record`.
+Handle kinds differ in where they may be stored, and the difference is not about flatness. A collection or string reference is made by the runtime and may sit at any depth inside a component. An entity or component handle may not be stored at all; escaping is unspellable, which is what makes its validity structural rather than checked.
+
+A structure may therefore live wherever all of its fields may live. The front end carries a storability bit per declared type, set by the most restrictive field and propagated outward to whatever contains that type — so a `record` holding an entity handle is refused as a component field for the same reason the handle itself is, and a `record` holding a collection is admitted for the same reason the collection is.
 
 The offending field path is stored alongside the taint at declaration time, so reporting a failure does not require re-walking the type.
+
+Blocked on the contract: no handle's lifetime or escape rule is currently stated in the spec ([Pending](Pending.md#data-modeling-and-declaration-syntax)).
 
 ### Incremental compilation
 

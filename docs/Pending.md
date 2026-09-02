@@ -31,7 +31,7 @@ Root blocker for the rest of this section, for `changed` on a non-owning peer, a
 Held here, not examinable before the model is chosen:
 
 - *Copy granularity.* Unit of transfer between peers: memory block, sub-range, or single component.
-- *Storage for pointer-like component data.* The ECS-managed buffers `dynamic` selects. Reached via [addressability](#storage-and-memory-layout) below.
+- *Storage for pointer-like component data.* The ECS-managed buffers an `external` field selects. Their semantics are settled — see [Collections](Language%20Spec.md#collections) and [Storage](Language%20Spec.md#storage) — but their layout is not.
 
 ### Entity identity and generation · `pending` · `4`
 
@@ -43,25 +43,19 @@ Encoding must be canonical — no spare bits, no two patterns naming one entity 
 
 Memory block selection, delta compression, peer topology — all unwritten. [Frame Model](Engine%20Core.md#frame-model-and-synchronization) records only the premise: per-frame chunk copies, a peer either owning or receiving. `non_serialized`, bit packing and the flat-copyable rule are all written against it.
 
-### Addressability of a `dynamic` component field · `pending` · `3`
+### Layout of nested external data · `pending` · `4`
 
-Field legality is written up ([flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule), [Storage](Language%20Spec.md#storage)). What is not:
+[External data may appear at any depth](Language%20Spec.md#storage). That is settled contract; how it is laid out is not.
 
-- Is the field directly addressable, or handle-like? Holding a reference across a frame boundary is the case that bites — handle validity, asked of engine-managed memory.
-- Is `dynamic` just about storage, or does it change semantics? `let s = label.body` copies (O(n), destination unstated) or aliases.
+Settled, and why the promise is safe to make: [an author cannot install a handle into stored data](Language%20Spec.md#data-modeling), so every nested reference is runtime-made and the discriminant distinguishing ECS-managed from general memory is static — decided by where the field lives, never at run time. A per-pointer check at sync time, and silent corruption in networked builds, are both off the table. The earlier requirement that promotion be an explicit named operation is discharged too: [field assignment stores contents](Language%20Spec.md#data-modeling), so writing a record with nested external fields into a component is already a deep copy by a rule the spec states.
 
-Copy keeps `dynamic` a pure cost annotation and the value/handle split clean. Share makes a `string` copied or shared depending on where it was declared, and makes [Storage](Language%20Spec.md#storage) calling it "transparent for the user" false.
+Open:
 
-### Nested dynamic data in components · `idea` · `2`
+- One pointer representation, or two? A block-relative offset survives blind copying and a general pointer does not, so a `value` on the stack and the same `value` in storage may need different layouts at the same size.
+- What a copy into storage costs. Deep copy plus reference fixup, proportional to nested content; the references themselves come from walking the [flattened layout](Engine%20Core.md#component-flattening).
+- "Block-relative" presumes archetype storage; under inverted bitmaps there may be no block to be relative to. Blocked on the [storage model](#storage-and-memory-layout).
 
-Wanted, not now. Blocked on the storage model, and safe to defer — a strict superset of the current rule, so nothing written today becomes illegal.
-
-Idea: one pointer representation discriminating ECS-managed from general memory in the same space, so dynamic data nests at any depth rather than only at a component's top level.
-
-- **The discriminant cannot be dynamic.** A block-relative offset survives blind copying; a general pointer does not. Deciding at run time means a per-pointer sync-time check or silent corruption in networked builds, so the mode must be static — decided by where the field lives.
-- **That reintroduces two layouts per `value`**, same size, different meaning. Copying stack-side into a component becomes a deep copy plus pointer fixup, proportional to dynamic content. Coherent only if promotion is an explicit named operation, never silent assignment — where the previous iteration independently landed ([Previous Iteration.md:34](Previous%20Iteration.md)).
-
-"Block-relative" presumes archetype storage; under inverted bitmaps there may be no block to be relative to.
+Stated objective (Joaquin, 2026-09-01): make [the synchronization path](#storage-and-memory-layout) treat an `external` field as cheaply as an inline one, at which point the [placement annotation](Language%20Spec.md#storage) has no consequence left to announce and can be dropped. Reads and copies can plausibly reach chunk-cost; growth cannot, since a length change is a structural change, so the surviving distinction may be fixed-size against resizable rather than inline against external.
 
 ### Flattened component layout · `mechanism` · `3`
 
@@ -274,7 +268,7 @@ A bitfield is collection-like, so membership takes [`in`](Language%20Spec.md#mem
 
 ### Sets and maps · `pending` · `2`
 
-Unspecified whether either exists. Both hit the same wall as any container inside a component: the [flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) wants fixed size and no pointers, so a hash-backed container is a `dynamic` field at best and outside a component at worst.
+Unspecified whether either exists. Both hit the same wall as any container inside a component: the [flat-copyable rule](Engine%20Core.md#the-flat-copyable-rule) wants fixed size and no pointers, so a hash-backed container is an `external` field at best and outside a component at worst.
 
 If they arrive, membership takes [`in`](Language%20Spec.md#membership-semantics), as for every other collection — `key in m`, and Odin covers bit packing the same way.
 
@@ -295,17 +289,17 @@ Four candidates, none designed:
 
 Also unspelled: varargs declaration syntax, and where the call-site array's element representation comes from — the entry below.
 
-### An array-typed parameter erases its element representation · `discrepancy` · `3`
+### A collection parameter erases its element representation · `discrepancy` · `3`
 
 Widths come from `range` and `precision`, and [Numeric Types](Language%20Spec.md#numeric-types) states widths are a guarantee. An array carries those annotations once, so it is homogeneous — but the receiving parameter is spelled bare.
 
 ```
-define proc sum(integer[] numbers)
+define proc sum(List(integer) numbers)
 ```
 
-`integer x range(0..999)` gives 16-bit elements, bare `integer` gives 32-bit, and both are `integer[]`. So that signature accepts one representation only, or silently rescales — and rescaling breaks widths-as-guarantee *and* [pass by reference](Language%20Implementation.md#parameter-passing), since it forces a whole-array copy.
+`integer x range(0..999)` gives 16-bit elements, bare `integer` gives 32-bit, and both are `List(integer)`. So that signature accepts one representation only, or silently rescales — and rescaling breaks widths-as-guarantee *and* [pass by reference](Language%20Implementation.md#parameter-passing), since it forces a whole-collection copy.
 
-Fix: make element representation part of the array's type and generic over it, monomorphized per instantiation — the sized-generic shape in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#arrays-fixed-strings-symbolstags-sized-generics), extended from capacity to `(range, f)`. Blocked on [generics](#data-modeling-and-declaration-syntax).
+Half fixed by the collection redesign: the element type now has a syntactic home, so `List(integer range(0..999))` is spellable and distinct from `List(integer)`. What remains is monomorphizing over it, which is [blocked on generics](#data-modeling-and-declaration-syntax) — the sized-generic shape in [Previous Iteration Syntax](Previous%20Iteration%20Syntax.md#arrays-fixed-strings-symbolstags-sized-generics), extended from capacity to `(range, f)`.
 
 Note what does *not* need instantiating: [computation expands to 64 bits](Language%20Implementation.md#arithmetic), so there is no per-width arithmetic — only a widening load, a rescale shift, a narrowing store. A body compiles once and specializes its accessors.
 
@@ -327,21 +321,53 @@ Extraction survives these conditions; the cost is scheduler precision, opt-in.
 
 Blocked on a `ComponentId` type, which belongs to [the core API](#core-api).
 
-### Arrays are specified as fixed-count, but are meant to behave as lists · `discrepancy` · `4`
+### `List` has no operations · `pending` · `3`
 
-[Arrays](Language%20Spec.md#arrays) reads as fixed count throughout, and a literal's bound is "the number of elements written". The intent is that a bound is *capacity* with a runtime element count, which the spec never says. No way to read a length, no append, no remove.
+[`List(T)`](Language%20Spec.md#collections) has a runtime element count and nothing to read or change it with. Needs reading the count, appending and removing, and a rule for what appending past `capacity(n)` does — failing matches [range violations](Language%20Spec.md#ranges), which do not clamp either.
 
-Surfaced by the comparison pass: [array equality](Language%20Spec.md#comparison-semantics) compares length at run time, correct only under the list reading.
+Spellings are constrained by [no dot-call syntax](Shelved.md#data-modeling-and-declaration-syntax), so these are free procedures over the collection. `count` is also a [query reduction](#queries-and-predicates); reusing the name is the [one clause vocabulary](#queries-and-predicates) idea arriving early rather than a collision.
 
-### String characters, and what a fixed string can hold · `pending` · `3`
+### String encoding · `pending` · `2`
 
-[`length(n)` counts characters](Language%20Spec.md#strings), following [Domain over technicism](Design%20Principles.md#domain-over-technicism), but a character count gives no fixed inline size unless the encoding is fixed-width or the field reserves a worst case.
+Open: what encoding do [strings](Language%20Spec.md#strings) use, and may they hold non-ASCII?
 
-Open: what encoding? May a fixed-length string hold non-ASCII? If so, what does `length(16)` cost in bytes? Deferred deliberately — a storage question, and nothing in the current surface depends on it.
+Deferrable again. The conflict was that a character count gives no fixed inline size unless the encoding is fixed-width or the field reserves a worst case, which made an inline string's footprint — and therefore its placement — unevaluable. Strings being always external removes the layout dependency entirely; the encoding is now a property of a runtime-owned buffer and nothing in the surface reads it.
 
-### Slices · `pending` · `3`
+Still needed eventually by [slices](#data-modeling-and-declaration-syntax) and by iterating a string, both of which want a per-character type.
 
-No way to name a sub-range of a string or array. A slice type covers it, and is what iterating a string should yield — `for c in name` needs a per-character type, and there is no `char` and no appetite for one. Until then strings are not iterable, though they remain valid [membership](Language%20Spec.md#membership-semantics) operands.
+### An interned identifier type · `idea` · `2`
+
+[Strings are always external](Language%20Spec.md#strings), so a short identifier in a component costs an indirection. A string is the wrong tool for that case regardless — the need is O(1) comparison and a fixed width, not text.
+
+Shape, if it is real: an index into an intern table filled at the load boundary, so the value is flat-copyable and serializable rather than a pointer. Godot's `StringName` is the precedent for promoting interning into a distinct type instead of leaving it an invisible optimization, which is the same reasoning as [No hidden costs](Design%20Principles.md#no-hidden-costs). Its known failure is implicit conversion to and from text; conversion would have to be a named operation from the start.
+
+To settle first: whether identifiers exist that are not known at compile time. If every identifier is a compile-time set, [enums](Language%20Spec.md#enums) already cover the case — O(1), fixed-width, flat-copyable, with payloads. The case this answers is data-driven content whose IDs arrive at load. If nothing is created after load, the table is frozen and needs no runtime insertion story.
+
+Purely additive, so deferring costs nothing. The fallback if it never arrives is that text in a component is cold data and pays the chase.
+
+### Text accumulation has no construct · `pending` · `1`
+
+[Strings are immutable and there is no concatenation operator](Language%20Spec.md#strings), so interpolation is the only way to build one. Accumulating across branches or a loop is O(n²), or unwritable.
+
+Settled: a growable scratch space with [handle semantics](Language%20Spec.md#data-modeling), appended to with whole strings, producing its final `string` through an explicit named operation rather than a coercion. It is a frame-local tool, not component data — the existing structural validity rule (not storable in a component or file state, not held across a frame boundary) covers it with nothing new to check.
+
+Open: what it is called, how construction, append and output are spelled, whether a capacity argument is a hint or a guarantee, and whether output copies or spends the accumulator.
+
+### The inline/external default threshold · `pending` · `2`
+
+[Storage](Language%20Spec.md#storage) says placement follows capacity when unstated, without saying where the line is. Open: the number, and whether it is contract or mechanism.
+
+Stating it in the [Language Spec](Language%20Spec.md) makes it a promise that cannot be tuned without breaking cost expectations; leaving it to [Language Implementation](Language%20Implementation.md) keeps it tunable but means an author cannot predict what they got, which weakens the low-risk-default argument the design rests on. Deferred deliberately (Joaquin, 2026-09-01).
+
+It must be one constant, identical on every target — a threshold derived from cache-line size would give peers different component layouts, and [schema agreement](Engine%20Core.md#frame-model-and-synchronization) is a premise of the frame model.
+
+### Slices · `pending` · `4`
+
+No way to name a sub-range of a collection or string, and no way to write one procedure that reads either [collection type](Language%20Spec.md#collections). `define proc sum(List(integer) numbers)` cannot accept a `Fixed(integer, 8)`, and [no subtyping](Language%20Spec.md#non-goals) means nothing bridges them. Go, Rust and Odin all answer this the same way: the view is the common currency and both collections convert to it.
+
+Raised from `3` when the collection split landed — it stopped being a convenience and became the only spelling for a procedure over both.
+
+A slice is also what iterating a string should yield — `for c in name` needs a per-character type, and there is no `char`. That half stays blocked on [encoding](#data-modeling-and-declaration-syntax); the collection half does not. Until then strings are not iterable, though they remain valid [membership](Language%20Spec.md#membership-semantics) operands.
 
 ### Named-argument separator · `idea` · `1` · `syntax`
 
