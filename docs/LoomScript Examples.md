@@ -13,12 +13,12 @@ end
 ```
 module movement
 
-define component Position (
-	Vector3 value
+define Position component (
+	value Vector3
 )
 
-define component Velocity ( 
-	Vector3 value
+define Velocity component ( 
+	value Vector3
 )
 
 const speed = 10

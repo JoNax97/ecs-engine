@@ -8,6 +8,33 @@ Unwritten areas are listed at the bottom.
 
 ---
 
+## Declaration Grammar
+
+Every declaration has one shape: name, then what it is, then how it is refined.
+
+```
+variable      = "let" , [ access ] , name , [ type , { refinement } ] ,
+                [ "=" , expression ] ;
+field         = name , type , { refinement } ;
+define        = "define" , [ access ] , name , { "," , name } , kind ,
+                { refinement } , [ "(" , body , ")" ] ;
+
+access        = "private" | "internal" | "public" ;
+kind          = "record" | "component" | "tag" | "enum" | "relationship"
+              | "proc" | "signature" | "query" ;
+refinement    = keyword , [ "(" , arguments , ")" ] ;
+```
+
+A `define` is a declaration whose type slot holds a kind, so `Effect enum ordered` and `gold integer range(0..999)` are one production and one parser path. The name follows the keyword in both, so a declaration is recognized before its type is read.
+
+`let` is required rather than decorative: paren-less calls are legal statements, so a bare `health integer` is also a well-formed one-argument call. Fields and parameters need no keyword because neither appears in statement position. Omitting the type is what makes a declaration inferred, so there is one production rather than two.
+
+Access sits between `define` and the name and is the only infix element. It qualifies the act of defining, so it has no meaning in a field or parameter list.
+
+Refinements are classified by position. One that qualifies a type travels into a type argument — `Array(integer range(0..999), 8)`. One that qualifies a declaration does not, so `Array(integer external, 8)` fails at the parse.
+
+---
+
 ## Numeric Representation
 
 Numbers are fixed-point. The language exposes only `integer` and `decimal`; width, signedness and fractional precision are derived from the declared `range` and `precision` annotations.
@@ -150,13 +177,13 @@ The spec bars a constant assigned from a load-time conditional from determining 
 
 ### Storability taint
 
-Handle kinds differ in where they may be stored, and the difference is not about flatness. A collection or string reference is made by the runtime and may sit at any depth inside a component. An entity or component handle may not be stored at all; escaping is unspellable, which is what makes its validity structural rather than checked.
+Handle kinds differ in where they may be stored. A collection or string reference is made by the runtime and may sit at any depth inside a component. An entity or component handle may not be stored at all; escaping is unspellable, which is what makes its validity structural.
 
-A structure may therefore live wherever all of its fields may live. The front end carries a storability bit per declared type, set by the most restrictive field and propagated outward to whatever contains that type — so a `record` holding an entity handle is refused as a component field for the same reason the handle itself is, and a `record` holding a collection is admitted for the same reason the collection is.
+A structure may live wherever all of its fields may live. The front end carries a storability bit per declared type, set by the most restrictive field and propagated outward to whatever contains that type, so a `record` holding an entity handle is refused as a component field and a `record` holding a collection is admitted.
 
 The offending field path is stored alongside the taint at declaration time, so reporting a failure does not require re-walking the type.
 
-Blocked on the contract: no handle's lifetime or escape rule is currently stated in the spec ([Pending](Pending.md#data-modeling-and-declaration-syntax)).
+The escape rule this enforces is not yet stated in the spec ([Pending](Pending.md#data-modeling-and-declaration-syntax)).
 
 ### Incremental compilation
 

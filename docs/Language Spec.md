@@ -67,22 +67,25 @@ e.Health.current  | Health is a type, not a field
 
 ### Variables
  
-A variable is an identifier whose value can change. It is declared with a type and assigned with `=`.
+A variable is an identifier whose value can change. Variables are statically-typed: they are fixed at declaration and cannot change.
 
-Variable types are static: fixed at declaration and unable to change. Declarations begin with the type followed by an identifier, may carry [annotations](#annotations), and may omit the initializer.
+Variables are declared with the `let` keyword, followed by the name and type. [Annotations](#annotations) and initial assignment are optional. 
+
+The type may be omitted, in which case it is inferred from the initializer. An inferred declaration takes no annotations and assumes the most generous representation available.
 
 ```
-integer health                   | zero-initialized
-integer ammo range(0..999) = 30  | explicit value, annotated
+let health integer                    | zero-initialized
+let ammo integer range(0..999) = 30   | explicit value, annotated
+let x = 5                             | inferred
+x = 6                                 | reassignment
 ```
-
-Inside procs and query bodies, variable declarations can be inferred by using the `let` keyword followed by an identifier. `let` infers the type from its initializer and therefore always requires one. `let` takes no annotations. A `let` declaration assumes the most generous representation available, so it can hold any value a declared field can produce. To control representation, use explicit declaration.
 
 A bare assignment using `=` reassigns a previously declared variable. Assigning an undeclared variable is an error.
 
+At file scope a `let` may carry a [visibility](#visibility) keyword, in the same position it takes on a `define`.
+
 ```
-let x = 5                        | inferred
-x = 6                            | reassignment
+let private score integer range(0..999)
 ```
 
 ### Bindings
@@ -92,7 +95,7 @@ A binding is an identifier whose value is supplied by the construct that introdu
 A binding cannot be reassigned, but it can be mutated if the underlying type allows it. To derive a new value from a parameter, declare one.
 
 ```
-define proc apply_damage(Health health, integer amount)
+define apply_damage proc (health Health, amount integer)
     amount = clamp(amount, 0, health.current)        | Invalid, amount cannot be reassigned
     let dealt = clamp(amount, 0, health.current)     | Do this instead
     health.current -= dealt                          | Valid, health is mutated, not reassigned
@@ -108,7 +111,7 @@ A `const` may appear at the top level or inside any block. Constants cannot be g
 ```
 const max_inventory = 30
 
-Fixed(integer, max_inventory) slots
+let slots Array(integer, max_inventory)
 ```
 
 ### Discards
@@ -194,7 +197,7 @@ for i in range(0..n)
     ...
 end
 
-for element in array
+for element in items
     ...
 end
 ```
@@ -234,11 +237,11 @@ The `boolean` type is a boolean. What else do you want.
 A string is a sequence of characters. It has no declared bound, and its characters are always stored [externally](#storage): the runtime owns them and a string holds a reference to them.
 
 ```
-string name = "Loom"
-define record Text (string value)
+let name string = "Loom"
+define Text record (value string)
 ```
 
-Strings are immutable. A string is written as a literal, an interpolation, or by assigning another string, and is never edited in place. There is no concatenation operator; ` + ` is [arithmetic](#operators) only.
+Strings are immutable: a string is written whole, as a literal, an interpolation, or by assigning another string. There is no concatenation operator; ` + ` is [arithmetic](#operators) only.
 
 Strings can be interpolated by inserting arguments using `$`. Add parenthesis for more complex expressions:
  
@@ -249,25 +252,29 @@ Strings can be interpolated by inserting arguments using `$`. Add parenthesis fo
 
 ### Collections
 
-There are two collection types. They differ in whether the number of elements can change.
-
-`Fixed(T, n)` holds exactly `n` elements of type `T`. The count is part of the type, so `Fixed(integer, 3)` and `Fixed(integer, 4)` are different types, and every index below `n` is always valid.
-
-`List(T)` holds a varying number of elements. `capacity(n)` bounds it; without one it is unbounded. A zero-initialized list is empty.
+Collections come in two kinds. An **array** is always fully populated: every element exists, and elements cannot be added or removed. An array size can be fixed at declaration type, or given a size at asignment time.
 
 ```
-Fixed(decimal, 16) transform         | exactly 16 decimals
-List(Item) inventory capacity(30)    | up to 30 items, empty to start
-List(Vector3) targets                | unbounded
+let transform Array(decimal, 16)         | exactly 16 decimals
+let tiles     Array(Tile)                | size determined at assignment.
 ```
 
-An element's own annotations sit with the element type, inside the parentheses:
+A **list** holds a varying number of elements, and can be added to. Lists are initialized with a count of zero by default.
+
+By default, it has no max capacity and will grow to accomodate as many elements as needed. A max capacity can be declared by using the `capacity(n)` annotation. 
 
 ```
-Fixed(integer range(0..999), 8) buckets
+let inventory List(Item) capacity(30)    | up to 30 items, empty to start
+let indices   List(int) = [10, 11, 12]   | starts with 3 items, can grow indefinitely
 ```
 
-Collections have [handle semantics](#data-modeling); binding one references it. Storage and semantics are independent: a collection stored inline is still referenced when bound.
+Annotations of the element type sit inside the parentheses:
+
+```
+let buckets Array(integer range(0..999), 8)
+```
+
+Collections have [handle semantics](#data-modeling); binding one references it.
 
 ```
 let s = inv.slots      | references the collection
@@ -276,10 +283,10 @@ s = other              | repoints s, inv.slots is unaffected
 inv.slots = other      | copies the contents into the field
 ```
 
-Elements are read and written through a bracketed index. A collection literal is a bracketed, comma-separated list of values of a single type, and takes the `Fixed` type its element count implies.
+Elements are read and written through a bracketed index. A collection literal is a bracketed, comma-separated list of values of a single type, and takes the `Array` type by default.
 
 ```
-let scores = [10, 20, 30]    | Fixed(integer, 3)
+let scores = [10, 20, 30]    | Array(integer, 3)
 ```
 
 ### Tuples
@@ -290,7 +297,7 @@ Tuple elements are either all named or all unnamed; the twoe cannot mixed. Unnam
 
 ```
 let pair = (x, y)
-let result = (min: n, max: m, avg: q)
+let result = (min = n, max = m, avg = q)
 
 print pair.first
 print result.min
@@ -302,7 +309,7 @@ Tuples are compared structurally: Two tuples are compatible when their element t
 A tuple is constructed implicitly when an argument list is passed to a tuple parameter, and is never taken apart implicitly. Implicit construction is a coercion, so an exact parameter match is preferred over it.
 
 ```
-define proc translate(Entity e, (integer x, integer y) delta) 
+define translate proc (e Entity, delta (x integer, y integer)) 
 ...
 end
 
@@ -390,9 +397,9 @@ There is no numeric cast syntax. Numeric conversions are rescales the language p
 Storing a decimal value into a decimal field of narrower precision implicitly rounds to nearest. Storing a `decimal` into an `integer` field, however, requires specifying a conversion behavior via `floor`, `round`, `ceil` or `truncate`. These procedures can take their target precision from where the result is stored, or take it explicitly:
 
 ```
-integer cell = floor(position / cell_size)
-integer damage = round(base * multiplier)
-decimal coarse = round(position, 2)
+let cell   integer = floor(position / cell_size)
+let damage integer = round(base * multiplier)
+let coarse decimal = round(position, 2)
 ```
 
 ## Program Structure
@@ -469,14 +476,14 @@ module combat
 
 import optional magic_items
 
-define enum DamageType (
+define DamageType enum (
 	Slashing,
 	Blunt,
 	Piercing
 )
 
 if magic_items
-	define tag Enchanted
+	define Enchanted tag
 end
 ```
 
@@ -500,10 +507,10 @@ An author therefore cannot install a handle into stored data. Every reference he
 A `record` is a plain aggregate type. It has value semantics, and is not directly addressable.  
 
 ```
-define record Vector3 (
-    integer x,
-    integer y,
-    integer z
+define Vector3 record (
+    x integer,
+    y integer,
+    z integer
 )
 ```
   
@@ -512,9 +519,9 @@ define record Vector3 (
 A `component` is the unit of data of an entity. It has handle semantics, is query-able, and is addressable through its entity. 
 
 ```
-define component Health (
-    integer current,
-    integer max
+define Health component (
+    current integer,
+    max integer
 )
 ```
  
@@ -523,7 +530,7 @@ define component Health (
 A `tag` is a special kind of component with no data. It is neither a value nor a handle: it cannot be bound, assigned or passed. It can only be tested for presence.
 
 ```
-define tag Stunned
+define Stunned tag
 ```
  
 ### Enums
@@ -532,17 +539,17 @@ An `enum` is a closed set of named labels with value semantics.
 Labels are ordered by their declaration. The first label is the default; a zero-initialized enum holds it. Labels optionally may have one or more fields.
 
 ```
-define enum Effect (
+define Effect enum (
     Nothing,
     Stun,
-    Heal(integer amount range(0..1000), Entity source)
+    Heal(amount integer range(0..1000), source Entity)
 )
 ```
 
 An enum may be declared `ordered`, which makes relational comparisons available on it. Ordering compares the label first, by declaration order, and then the payload fields. An ordered enum requires every payload field to be itself orderable.
 
 ```
-define enum Severity (Info, Warning, Error) ordered
+define Severity enum ordered (Info, Warning, Error)
 ```
 
 Enums can be pattern-matched using `match` statements. A label's fields are accessed by binding the label to an identifier:
@@ -587,27 +594,27 @@ A `relationship` is a special kind of component that links entities together.
 By default, relationships are single target and unidirectional; only the source entity is aware of the relationship.
 
 ```
-define relationship Target
+define Target relationship
 ```
  
 Relationships can also have multiple targets. Max target amount is optional.
 
 ```
-define relationship Targets[8]
+define Targets[8] relationship
 ```
  
 Relationships can be marked as `mutual`. Mutual relationships are bidirectional; both sides are aware of each other. 
 The same name can be used from both sides, or a different name can be specified for each side. Mutual relationships can also have multiple targets.
 
 ```
-define relationship Spouse mutual
-define relationship Parent, Children[10] mutual
+define Spouse relationship mutual
+define Parent, Children[10] relationship mutual
 ```
 
  Relationships can also have data, just like normal components.
 ```
-define relationship Likes (
-    integer intensity
+define Likes relationship (
+    intensity integer
 )
 ```
  
@@ -617,7 +624,7 @@ Transitive, ephemeral and exclusive relationships are unspecified; see [Pending]
 
 Types are constructed simply by using the type identifier. There is no `new` operator. 
 
-Field values can be passed positionally or by name. Named values must always be passed after positional ones.
+Field values can be passed positionally or by name, and a named value is written as an assignment to the field. Named values must always be passed after positional ones.
 Parens are optional when no values are assigned.  Values not passed are initialized with their zero values. 
  
 ```
@@ -625,17 +632,17 @@ let v = Vector3 | Same as Vector3()
 
 v = Vector3(1, 2, 3)
 
-let w = Weapon(damage: 10, ammo: 100)
+let w = Weapon(damage = 10, ammo = 100)
 
-let l = Label(text, size, alignment: Alignment.Left)
+let l = Label(text, size, alignment = Alignment.Left)
 ```
 
 ### Visibility
  
-Every `define` may be accompanied by a visibility keyword:
+Every `define` may be accompanied by a visibility keyword, which follows `define` and precedes the name:
  
 ```
-define private record HelperData(...)
+define private HelperData record (...)
 ```
 
 | Keyword    | Scope                                              |
@@ -653,30 +660,30 @@ Defaults differ by category, following ECS principles:
  
 A collection field is stored one of two ways. **Inline** puts the elements inside the enclosing type, contributing to its size. **External** gives the elements to the runtime, and the field holds a reference to them.
 
-The two trade opposite kinds of locality, and which one wins depends on how the data is read:
+The two trade opposite kinds of locality, so the choice follows how the data is read:
 
-- **Inline** reaches elements with no indirection, and they are already in cache once the enclosing component is. Right when the collection is read on most iterations, or is small.
+- **Inline** reaches elements with no indirection, and they are in cache once the enclosing component is. Right when the collection is small, or read on most iterations.
 - **External** keeps the component small, so a query walking many components fits more of them in cache. Right when the component is visited far more often than the collection is touched.
 
-Unstated, placement follows capacity: a collection small enough is inline, and anything larger is external. An unbounded collection is always external, since there is no size to inline. Either placement can be stated explicitly to override the default.
+Unstated, placement follows the declared size: a collection small enough is inline, and anything larger is external. A collection with no declared size — an unbounded `List(T)`, or an `Array(T)` sized at creation — is always external, since there is nothing to inline. Either placement can be stated explicitly to override the default.
 
 [Strings](#strings) have no placement to choose. They are always external, so a component reaches its text through a reference.
 
 ```
-define component Label (
-    List(Item) items capacity(8),          | inline by default
-    Fixed(decimal, 1024) table external    | forced out of line
+define Label component (
+    items List(Item) capacity(8),          | inline by default
+    table Array(decimal, 1024) external    | forced out of line
 )
 ```
 
-External data may appear at any depth. A `record` holding an external field, or a string, can be used inside a component like any other; each external field costs what an external field costs, wherever it sits.
+External data may appear at any depth. A `record` holding an external field or a string can be used inside a component, and the cost is per external field wherever it sits.
 
-Outside a defined type there is no enclosing layout to sit in, so placement does not apply and neither annotation is accepted.
+Outside a defined type there is no enclosing layout, so placement does not apply and neither annotation is accepted.
 
 ```
-string text                            | no placement to state
+let text string                        | no placement to state
 
-define proc sum(List(integer) numbers)
+define sum proc (numbers List(integer))
     ...
 end
 ```
@@ -699,7 +706,7 @@ Even though components and collections are handle types, they are compared struc
 
 Two entities are equal when they are the same entity. A destroyed entity is never equal to one created in its place.
 
-A collection's element type is checked at compile time and a mismatch is an error. Element count and contents are compared at run time.
+A collection's element type is part of its type, as is an `Array(T, n)`'s count, so a mismatch in either is a compile error. Remaining element counts and contents are compared at run time.
 
 Relational comparisons apply to numeric types and `ordered` enums. No other type is relationally comparable.
 
@@ -708,7 +715,7 @@ Relational comparisons apply to numeric types and `ordered` enums. No other type
 The semantics of the `in` operator vary depending on the type of the collection.
 
 - Over a range, the test is against its bounds.
-- Over an array, it is element equality across the array's contents.
+- Over a collection, it is element equality across its contents.
 - Over a string, it is containment of a substring, not membership of an element.
 - Over a multi-target relationship, it is whether the entity is one of its targets.
 
@@ -725,7 +732,7 @@ if "error" in log_message ...
 A declaration may be followed by one or more annotations to provide additional information about that declaration. An annotation is either a bare keyword or a keyword with parenthesized arguments, space-separated from the declaration and from each other. For example:
  
 ```
-integer counter range(0..) | constrains the range to be non-negative
+let counter integer range(0..) | constrains the range to be non-negative
 ```
  
 Annotations can be used with any declaration that can carry extra information; fields, arguments, queries, etc.
@@ -737,7 +744,7 @@ Annotations can be used with any declaration that can carry extra information; f
 Procedures are reusable code routines that can be invoked from anywhere:
  
 ```
-define proc lerp(decimal a, decimal b, decimal t) returns decimal
+define lerp proc (a decimal, b decimal, t decimal) returns decimal
     return a + (b - a) * t
 end
 
@@ -748,7 +755,7 @@ let f = lerp(a, b, 0.5)
 Multiple return values are declared with a comma-separated, optionally named list after `returns`. The returned type is a tuple, which can be deconstructed at call site:
  
 ```
-define proc divmod(integer a, integer b) returns integer div, integer mod
+define divmod proc (a integer, b integer) returns div integer, mod integer
     return a // b, a % b
 end
 
@@ -780,19 +787,19 @@ print get_score      | a bare name in argument position is a reference; print ex
 Procedures may be overloaded, giving one operation a single name across the inputs it accepts. Overloaded procedures share an identifier, and accept different types and/or amounts of arguments. Procedures' return types, parameter names and constraints are not considered for overloading.
 
 ```
-define proc damage(Entity target, integer amount) ...
+define damage proc (target Entity, amount integer) ...
 
-define proc damage(Entity target, decimal fraction) ...
+define damage proc (target Entity, fraction decimal) ...
 
-define proc damage(Entity target, integer amount, DamageType kind) ...
+define damage proc (target Entity, amount integer, kind DamageType) ...
 ```
 
 When calling an overloaded procedure, the one requiring the least coercion is selected.
 
 ```
-define proc foo(integer a, integer b) ...
+define foo proc (a integer, b integer) ...
 
-define proc foo(integer a, decimal b) ...
+define foo proc (a integer, b decimal) ...
 
 foo(2, 3)  | Chooses the first declaration since it better matches the arguments
 ```
@@ -802,13 +809,13 @@ foo(2, 3)  | Chooses the first declaration since it better matches the arguments
 A signature declares a named parameter list and return type, so that a procedure can be passed to another procedure.
 
 ```
-define signature ItemComparison(Item a, Item b) returns boolean
+define ItemComparison signature (a Item, b Item) returns boolean
 
-define proc sort(List(Item) items, ItemComparison before)
+define sort proc (items List(Item), before ItemComparison)
     ...
 end
 
-define proc by_weight(Item a, Item b) returns boolean
+define by_weight proc (a Item, b Item) returns boolean
     return a.weight < b.weight
 end
 
@@ -836,14 +843,14 @@ print entity.id
  
 ```
 let e = create Entity with 
-    Health(current: 100, max: 100),
+    Health(current = 100, max = 100),
     Position,
     Parent(other_entity)
 ```
 
 The `with` list may be wrapped in parentheses, but the form above is idiomatic. A component taking no arguments drops its empty parentheses, so `Position` and `Position()` are the same.
 
-Many entities are created at once by giving a count. The count is any integer expression, and the result is an array of the created entities.
+Many entities are created at once by giving a count. The count is any integer expression, and the result is an `Array(Entity)` sized by it.
 
 ```
 let batch = create Entity[count] with Position, Velocity
@@ -898,7 +905,7 @@ delete e
 A query declares a structural match over one or more entities, an optional set of conditions to filter them, and a body that runs once per matching result. Like procs, queries can be named if they want to be manually invoked, or they can remain anonymous and be declared directly as event listeners.
  
 ```
-define query attack_nearby_enemies
+define attack_nearby_enemies query
 for
     (attacker with Weapon, Position, Faction),
     (target with Health, Position, Faction)
