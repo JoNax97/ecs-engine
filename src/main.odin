@@ -20,7 +20,7 @@ main :: proc() {
 
 	fmt.println("-- tokens --")
 	for tok in tokens {
-		fmt.printfln("%-10v %-10q pos=%d", tok.kind, tok.text, tok.pos)
+		fmt.printfln("%-10v %-10q pos=%d len=%d", tok.kind, tok.text, tok.pos, tok.len)
 	}
 
 	program, errors := loomscript.parse(tokens)
@@ -31,7 +31,7 @@ main :: proc() {
 	if len(errors) > 0 {
 		fmt.println("-- errors --")
 		for err in errors {
-			fmt.printfln("pos=%d: %s", err.pos, err.msg)
+			fmt.printfln("pos=%d len=%d: %s", err.pos, err.len, err.msg)
 		}
 		os.exit(1)
 	}

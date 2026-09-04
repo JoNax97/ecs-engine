@@ -19,21 +19,20 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 		switch {
 		case c == '\n':
 			pos += 1
-			append(&tokens, Token{kind = .Newline, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.Newline, src, start, pos))
 
 		case unicode.is_digit(rune(c)):
 			for pos < len(src) && unicode.is_digit(rune(src[pos])) {
 				pos += 1
 			}
-			append(&tokens, Token{kind = .IntLiteral, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.IntLiteral, src, start, pos))
 
 		case is_ident_start(rune(c)):
 			for pos < len(src) && is_ident_continue(rune(src[pos])) {
 				pos += 1
 			}
-			text := src[start:pos]
 			kind := Token_Kind.Identifier
-			switch text {
+			switch src[start:pos] {
 			case "let":
 				kind = .Let
 			case "if":
@@ -43,27 +42,27 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 			case "end":
 				kind = .End
 			}
-			append(&tokens, Token{kind = kind, text = text, pos = start})
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '+':
 			pos += 1
-			append(&tokens, Token{kind = .Plus, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.Plus, src, start, pos))
 
 		case c == '-':
 			pos += 1
-			append(&tokens, Token{kind = .Minus, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.Minus, src, start, pos))
 
 		case c == '*':
 			pos += 1
-			append(&tokens, Token{kind = .Mult, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.Mult, src, start, pos))
 
 		case c == '(':
 			pos += 1
-			append(&tokens, Token{kind = .LParen, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.LParen, src, start, pos))
 
 		case c == ')':
 			pos += 1
-			append(&tokens, Token{kind = .RParen, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.RParen, src, start, pos))
 
 		case c == '=':
 			pos += 1
@@ -72,11 +71,11 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 				pos += 1
 				kind = .EqEq
 			}
-			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '!' && pos + 1 < len(src) && src[pos + 1] == '=':
 			pos += 2
-			append(&tokens, Token{kind = .NotEq, text = src[start:pos], pos = start})
+			append(&tokens, make_token(.NotEq, src, start, pos))
 
 		case c == '<':
 			pos += 1
@@ -85,7 +84,7 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 				pos += 1
 				kind = .LtEq
 			}
-			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '>':
 			pos += 1
@@ -94,7 +93,7 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 				pos += 1
 				kind = .GtEq
 			}
-			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case:
 			// unknown byte, skip for now (no error handling yet)
@@ -102,8 +101,15 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 		}
 	}
 
-	append(&tokens, Token{kind = .EOF, text = "", pos = pos})
+	append(&tokens, make_token(.EOF, src, pos, pos))
 	return tokens[:]
+}
+
+// make_token builds a token spanning src[start:end], deriving text/pos/len
+// from the same two offsets so they can never drift apart.
+@(private)
+make_token :: proc(kind: Token_Kind, src: string, start, end: int) -> Token {
+	return Token{kind = kind, text = src[start:end], pos = start, len = end - start}
 }
 
 @(private)

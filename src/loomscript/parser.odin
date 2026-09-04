@@ -1,11 +1,11 @@
 package loomscript
 
 import "core:mem"
-import "core:fmt"
 
 Parse_Error :: struct {
 	msg: string,
 	pos: int,
+	len: int, // pos+len spans the offending token, for underlining
 }
 
 Parser :: struct {
@@ -49,7 +49,7 @@ parse :: proc(tokens: []Token, allocator := context.allocator) -> (program: Prog
 			// second error here would just be noise pointing at the same
 			// root cause.
 			if len(p.errors) == errors_before {
-				push_error(&p, "expected newline after statement", tok.pos)
+				push_error(&p, "expected newline after statement", tok)
 			}
 			// recovery: skip to the next newline (or EOF) so one bad
 			// statement doesn't cascade errors through the rest of the file.
@@ -116,8 +116,8 @@ skip_newlines :: proc(p: ^Parser) {
 }
 
 @(private)
-push_error :: proc(p: ^Parser, msg: string, pos: int) {
-	append(&p.errors, Parse_Error{msg = msg, pos = pos})
+push_error :: proc(p: ^Parser, msg: string, tok: Token) {
+	append(&p.errors, Parse_Error{msg = msg, pos = tok.pos, len = tok.len})
 }
 
 // binary_precedence returns the binding power of a binary operator token;
@@ -153,7 +153,13 @@ parse_binary_op :: proc(p: ^Parser, min_prec: int) -> Expr {
 		right := parse_binary_op(p, prec + 1)
 
 		node := new(Expression_BinaryOp, p.allocator)
-		node^ = Expression_BinaryOp{pos = tok.pos, op = tok.kind, left = left, right = right}
+		node^ = Expression_BinaryOp{
+			pos   = tok.pos,
+			op    = tok.kind,
+			left  = left,
+			right = right,
+			span  = Span{start = expr_span(left).start, end = expr_span(right).end},
+		}
 		left = node
 	}
 
@@ -172,8 +178,18 @@ parse_unary_op :: proc(p: ^Parser) -> Expr {
 		advance(p)
 		operand := parse_unary_op(p)
 
+		end := tok.pos + tok.len
+		if operand != nil {
+			end = expr_span(operand).end
+		}
+
 		node := new(Expression_UnaryOp, p.allocator)
-		node^ = Expression_UnaryOp{pos = tok.pos, op = tok.kind, operand = operand}
+		node^ = Expression_UnaryOp{
+			pos     = tok.pos,
+			op      = tok.kind,
+			operand = operand,
+			span    = Span{start = tok.pos, end = end},
+		}
 		return node
 
 	case:
@@ -191,16 +207,16 @@ parse_operand :: proc(p: ^Parser) -> Expr {
 		advance(p)
 		value, ok := parse_int_literal(tok.text)
 		if !ok {
-			push_error(p, "integer literal too large", tok.pos)
+			push_error(p, "integer literal too large", tok)
 		}
 		node := new(Expression_IntLiteral, p.allocator)
-		node^ = Expression_IntLiteral{pos = tok.pos, value = value}
+		node^ = Expression_IntLiteral{pos = tok.pos, value = value, span = Span{tok.pos, tok.pos + tok.len}}
 		return node
 
 	case .Identifier:
 		advance(p)
 		node := new(Expression_Identifier, p.allocator)
-		node^ = Expression_Identifier{pos = tok.pos, name = tok.text}
+		node^ = Expression_Identifier{pos = tok.pos, name = tok.text, span = Span{tok.pos, tok.pos + tok.len}}
 		return node
 
 	case .LParen:
@@ -208,14 +224,14 @@ parse_operand :: proc(p: ^Parser) -> Expr {
 		inner := parse_binary_op(p, 0)
 		closing := peek(p)
 		if closing.kind != .RParen {
-			push_error(p, "expected ')'", closing.pos)
+			push_error(p, "expected ')'", closing)
 			return inner
 		}
 		advance(p)
 		return inner
 
 	case:
-		push_error(p, "expected expression", tok.pos)
+		push_error(p, "expected expression", tok)
 		advance(p)
 		return nil
 	}
@@ -251,22 +267,32 @@ parse_let_Statement :: proc(p: ^Parser) -> Statement {
 
 	name_tok := peek(p)
 	if name_tok.kind != .Identifier {
-		push_error(p, "expected identifier after 'let'", name_tok.pos)
+		push_error(p, "expected identifier after 'let'", name_tok)
 		return nil
 	}
 	advance(p)
 
 	eq_tok := peek(p)
 	if eq_tok.kind != .Assign {
-		push_error(p, "expected '=' in let statement", eq_tok.pos)
+		push_error(p, "expected '=' in let statement", eq_tok)
 		return nil
 	}
 	advance(p)
 
 	value := parse_binary_op(p, 0)
 
+	end := eq_tok.pos + eq_tok.len
+	if value != nil {
+		end = expr_span(value).end
+	}
+
 	node := new(Statement_Declaration, p.allocator)
-	node^ = Statement_Declaration{pos = let_tok.pos, name = name_tok.text, value = value}
+	node^ = Statement_Declaration{
+		pos   = let_tok.pos,
+		name  = name_tok.text,
+		value = value,
+		span  = Span{start = let_tok.pos, end = end},
+	}
 	return node
 }
 
@@ -274,12 +300,22 @@ parse_let_Statement :: proc(p: ^Parser) -> Statement {
 @(private)
 parse_assign_Statement :: proc(p: ^Parser) -> Statement {
 	name_tok := advance(p) // Ident
-	advance(p) // '='
+	eq_tok := advance(p) // '='
 
 	value := parse_binary_op(p, 0)
 
+	end := eq_tok.pos + eq_tok.len
+	if value != nil {
+		end = expr_span(value).end
+	}
+
 	node := new(Statement_Assignment, p.allocator)
-	node^ = Statement_Assignment{pos = name_tok.pos, name = name_tok.text, value = value}
+	node^ = Statement_Assignment{
+		pos   = name_tok.pos,
+		name  = name_tok.text,
+		value = value,
+		span  = Span{start = name_tok.pos, end = end},
+	}
 	return node
 }
 
@@ -292,9 +328,13 @@ parse_if_statement :: proc(p: ^Parser) -> Statement {
 	node := parse_if_head(p)
 
 	if peek(p).kind == .End {
-		advance(p)
+		end_tok := advance(p)
+		// Only the outermost node's span extends through 'end' — it's the
+		// one that actually consumed the token; nested 'else if' nodes keep
+		// spans covering just their own condition and body.
+		node.span.end = end_tok.pos + end_tok.len
 	} else {
-		push_error(p, "expected 'end' to close 'if'", peek(p).pos)
+		push_error(p, "expected 'end' to close 'if'", peek(p))
 	}
 
 	return node
@@ -309,11 +349,15 @@ parse_if_head :: proc(p: ^Parser) -> ^Statement_If {
 	if peek(p).kind == .Newline {
 		skip_newlines(p)
 	} else {
-		push_error(p, "expected newline after 'if' condition", peek(p).pos)
+		push_error(p, "expected newline after 'if' condition", peek(p))
 	}
 
 	node := new(Statement_If, p.allocator)
 	node^ = Statement_If{pos = if_tok.pos, cond = cond, then_body = parse_block(p)}
+	node.span = Span{
+		start = if_tok.pos,
+		end   = block_span_end(node.then_body, expr_span(cond).end),
+	}
 
 	if peek(p).kind == .Else {
 		advance(p) // 'else'
@@ -326,9 +370,11 @@ parse_if_head :: proc(p: ^Parser) -> ^Statement_If {
 			else_body := make([]Statement, 1, p.allocator)
 			else_body[0] = nested
 			node.else_body = else_body
+			node.span.end = statement_span(nested).end
 		} else {
 			skip_newlines(p)
 			node.else_body = parse_block(p)
+			node.span.end = block_span_end(node.else_body, node.span.end)
 		}
 	}
 
@@ -361,7 +407,7 @@ parse_block :: proc(p: ^Parser) -> []Statement {
 
 		if tok.kind != .Newline {
 			if len(p.errors) == errors_before {
-				push_error(p, "expected newline after statement", tok.pos)
+				push_error(p, "expected newline after statement", tok)
 			}
 			for peek(p).kind != .Newline && peek(p).kind != .Else && peek(p).kind != .End && peek(p).kind != .EOF {
 				advance(p)
@@ -379,7 +425,12 @@ parse_statement_expression :: proc(p: ^Parser) -> Statement {
 	tok := peek(p)
 	expr := parse_binary_op(p, 0)
 
+	end := tok.pos + tok.len
+	if expr != nil {
+		end = expr_span(expr).end
+	}
+
 	node := new(Statement_Expression, p.allocator)
-	node^ = Statement_Expression{pos = tok.pos, expr = expr}
+	node^ = Statement_Expression{pos = tok.pos, expr = expr, span = Span{start = tok.pos, end = end}}
 	return node
 }

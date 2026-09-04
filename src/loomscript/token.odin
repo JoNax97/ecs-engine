@@ -27,4 +27,5 @@ Token :: struct {
 	kind: Token_Kind,
 	text: string, // raw slice from source, e.g. "42"
 	pos:  int,    // byte offset in source, for error messages
+	len:  int,    // byte length in source; pos+len spans the token, for underlining
 }
