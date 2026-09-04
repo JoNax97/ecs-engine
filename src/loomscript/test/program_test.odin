@@ -24,8 +24,8 @@ test_parse_program_let_statement :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "expected Statement_Declaration")
 	testing.expect_value(t, stmt.name, "x")
 
-	value, ok2 := stmt.value.(^loomscript.Expression_IntLiteral)
-	testing.expect(t, ok2, "expected Expression_IntLiteral")
+	value, ok2 := stmt.value.(^loomscript.Expression_IntLit)
+	testing.expect(t, ok2, "expected Expression_IntLit")
 	testing.expect_value(t, value.value, 5)
 }
 
@@ -220,4 +220,73 @@ test_parse_program_if_missing_end_errors :: proc(t: ^testing.T) {
 	_, errors := parse_prog_src(t, arena, "if x > 0\n\ty = 1")
 	testing.expect_value(t, len(errors), 1)
 	testing.expect_value(t, errors[0].msg, "expected 'end' to close 'if'")
+}
+
+@(test)
+test_parse_program_compound_assign_desugars_to_binary_op :: proc(t: ^testing.T) {
+	// 'x += 1' must produce the exact same shape as 'x = x + 1': a
+	// Statement_Assignment whose value is a BinaryOp with a synthesized
+	// Identifier('x') on the left — no dedicated compound-assign node.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	program, errors := parse_prog_src(t, arena, "x += 1")
+	testing.expect_value(t, len(errors), 0)
+	testing.expect_value(t, len(program), 1)
+
+	stmt, ok := program[0].(^loomscript.Statement_Assignment)
+	testing.expect(t, ok, "expected Statement_Assignment")
+	if !ok do return
+	testing.expect_value(t, stmt.name, "x")
+
+	bin, ok2 := stmt.value.(^loomscript.Expression_BinaryOp)
+	testing.expect(t, ok2, "expected value to be Expression_BinaryOp")
+	if !ok2 do return
+	testing.expect_value(t, bin.op, loomscript.Token_Kind.Plus)
+
+	left, ok3 := bin.left.(^loomscript.Expression_Identifier)
+	testing.expect(t, ok3, "expected left operand to be Expression_Identifier")
+	if !ok3 do return
+	testing.expect_value(t, left.name, "x")
+	testing.expect_value(t, left.pos, stmt.pos) // synthesized target reuses the real 'x' token's position
+
+	right, ok4 := bin.right.(^loomscript.Expression_IntLit)
+	testing.expect(t, ok4, "expected right operand to be Expression_IntLit")
+	if ok4 {
+		testing.expect_value(t, right.value, 1)
+	}
+}
+
+@(test)
+test_parse_program_all_compound_assign_operators :: proc(t: ^testing.T) {
+	cases := []struct {
+		src: string,
+		op:  loomscript.Token_Kind,
+	}{
+		{"x -= 1", loomscript.Token_Kind.Minus},
+		{"x *= 1", loomscript.Token_Kind.Mult},
+		{"x /= 1", loomscript.Token_Kind.Div},
+		{"x //= 1", loomscript.Token_Kind.IntDiv},
+		{"x %= 1", loomscript.Token_Kind.Modulo},
+	}
+
+	for c in cases {
+		arena := make_test_arena(t)
+
+		program, errors := parse_prog_src(t, arena, c.src)
+		testing.expect_value(t, len(errors), 0)
+		testing.expect_value(t, len(program), 1)
+
+		stmt, ok := program[0].(^loomscript.Statement_Assignment)
+		testing.expect(t, ok, "expected Statement_Assignment")
+		if ok {
+			bin, ok2 := stmt.value.(^loomscript.Expression_BinaryOp)
+			testing.expect(t, ok2, "expected value to be Expression_BinaryOp")
+			if ok2 {
+				testing.expect_value(t, bin.op, c.op)
+			}
+		}
+
+		free_all(arena)
+	}
 }

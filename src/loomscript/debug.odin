@@ -67,8 +67,8 @@ write_expr :: proc(b: ^strings.Builder, expr: Expr, depth: int) {
 	}
 
 	switch node in expr {
-	case ^Expression_IntLiteral:
-		fmt.sbprintfln(b, "IntLiteral %d", node.value)
+	case ^Expression_IntLit:
+		fmt.sbprintfln(b, "IntLit %d", node.value)
 
 	case ^Expression_BinaryOp:
 		fmt.sbprintfln(b, "Binary %v", node.op)

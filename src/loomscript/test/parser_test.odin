@@ -13,9 +13,9 @@ as_binary :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expression_B
 }
 
 @(private = "file")
-as_int :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expression_IntLiteral {
-	node, ok := e.(^loomscript.Expression_IntLiteral)
-	testing.expect(t, ok, "expected Expression_IntLiteral")
+as_int :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expression_IntLit {
+	node, ok := e.(^loomscript.Expression_IntLit)
+	testing.expect(t, ok, "expected Expression_IntLit")
 	return node
 }
 
@@ -105,6 +105,27 @@ test_parse_precedence_mul_over_add :: proc(t: ^testing.T) {
 	testing.expect_value(t, inner.op, loomscript.Token_Kind.Mult)
 	testing.expect_value(t, as_int(t, inner.left).value, 3)
 	testing.expect_value(t, as_int(t, inner.right).value, 4)
+}
+
+@(test)
+test_parse_precedence_div_and_mod_over_add :: proc(t: ^testing.T) {
+	// '/', '//', '%' bind as tight as '*' — all above '+'/'-'.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+	expr, errors := parse_src(t, arena, "2 + 7 // 2 % 3")
+	testing.expect_value(t, len(errors), 0)
+
+	outer := as_binary(t, expr)
+	testing.expect_value(t, outer.op, loomscript.Token_Kind.Plus)
+	testing.expect_value(t, as_int(t, outer.left).value, 2)
+
+	inner := as_binary(t, outer.right)
+	testing.expect_value(t, inner.op, loomscript.Token_Kind.Modulo)
+
+	innermost := as_binary(t, inner.left)
+	testing.expect_value(t, innermost.op, loomscript.Token_Kind.IntDiv)
+	testing.expect_value(t, as_int(t, innermost.left).value, 7)
+	testing.expect_value(t, as_int(t, innermost.right).value, 2)
 }
 
 @(test)

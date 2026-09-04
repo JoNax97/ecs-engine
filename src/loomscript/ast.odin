@@ -24,7 +24,7 @@ Node_Base :: struct {
 // failed parse) has no span and reports the zero Span.
 expr_span :: proc(e: Expr) -> Span {
 	switch node in e {
-	case ^Expression_IntLiteral:
+	case ^Expression_IntLit:
 		return node.span
 	case ^Expression_BinaryOp:
 		return node.span
@@ -106,13 +106,13 @@ Statement_If :: struct {
 // Expressions
 
 Expr :: union {
-	^Expression_IntLiteral,
+	^Expression_IntLit,
 	^Expression_BinaryOp,
 	^Expression_UnaryOp,
 	^Expression_Identifier,
 }
 
-Expression_IntLiteral :: struct {
+Expression_IntLit :: struct {
 	using base: Node_Base,
 	value:      int,
 }

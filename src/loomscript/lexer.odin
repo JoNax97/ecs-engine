@@ -25,7 +25,7 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 			for pos < len(src) && unicode.is_digit(rune(src[pos])) {
 				pos += 1
 			}
-			append(&tokens, make_token(.IntLiteral, src, start, pos))
+			append(&tokens, make_token(.IntLit, src, start, pos))
 
 		case is_ident_start(rune(c)):
 			for pos < len(src) && is_ident_continue(rune(src[pos])) {
@@ -46,15 +46,52 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 
 		case c == '+':
 			pos += 1
-			append(&tokens, make_token(.Plus, src, start, pos))
+			kind := Token_Kind.Plus
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .PlusAssign
+			}
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '-':
 			pos += 1
-			append(&tokens, make_token(.Minus, src, start, pos))
+			kind := Token_Kind.Minus
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .MinusAssign
+			}
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '*':
 			pos += 1
-			append(&tokens, make_token(.Mult, src, start, pos))
+			kind := Token_Kind.Mult
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .MultAssign
+			}
+			append(&tokens, make_token(kind, src, start, pos))
+
+		case c == '/':
+			pos += 1
+			kind := Token_Kind.Div
+			if pos < len(src) && src[pos] == '/' {
+				pos += 1
+				kind = .IntDiv
+			}
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = kind == .Div ? .DivAssign : .IntDivAssign
+			}
+			append(&tokens, make_token(kind, src, start, pos))
+
+		case c == '%':
+			pos += 1
+			kind := Token_Kind.Modulo
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .ModuloAssign
+			}
+			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '(':
 			pos += 1
@@ -69,13 +106,13 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 			kind := Token_Kind.Assign
 			if pos < len(src) && src[pos] == '=' {
 				pos += 1
-				kind = .EqEq
+				kind = .Eq
 			}
 			append(&tokens, make_token(kind, src, start, pos))
 
 		case c == '!' && pos + 1 < len(src) && src[pos + 1] == '=':
 			pos += 2
-			append(&tokens, make_token(.NotEq, src, start, pos))
+			append(&tokens, make_token(.Neq, src, start, pos))
 
 		case c == '<':
 			pos += 1

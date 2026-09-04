@@ -21,7 +21,7 @@ test_tokenize_simple_expr :: proc(t: ^testing.T) {
 	tokens := loomscript.tokenize("12 + (3 * 4)", arena)
 
 	expected := []loomscript.Token_Kind{
-		.IntLiteral, .Plus, .LParen, .IntLiteral, .Mult, .IntLiteral, .RParen, .EOF,
+		.IntLit, .Plus, .LParen, .IntLit, .Mult, .IntLit, .RParen, .EOF,
 	}
 
 	testing.expect_value(t, len(tokens), len(expected))
@@ -39,7 +39,7 @@ test_tokenize_int_lit_text :: proc(t: ^testing.T) {
 	tokens := loomscript.tokenize("42", arena)
 
 	testing.expect_value(t, len(tokens), 2) // Int_Lit + EOF
-	testing.expect_value(t, tokens[0].kind, loomscript.Token_Kind.IntLiteral)
+	testing.expect_value(t, tokens[0].kind, loomscript.Token_Kind.IntLit)
 	testing.expect_value(t, tokens[0].text, "42")
 	testing.expect_value(t, tokens[0].pos, 0)
 }
@@ -90,13 +90,63 @@ test_tokenize_assign :: proc(t: ^testing.T) {
 	tokens := loomscript.tokenize("x = 5", arena)
 
 	expected := []loomscript.Token_Kind{
-		.Identifier, .Assign, .IntLiteral, .EOF,
+		.Identifier, .Assign, .IntLit, .EOF,
 	}
 	testing.expect_value(t, len(tokens), len(expected))
 	for kind, i in expected {
 		if i >= len(tokens) do break
 		testing.expect_value(t, tokens[i].kind, kind)
 	}
+}
+
+@(test)
+test_tokenize_division_operators :: proc(t: ^testing.T) {
+	// '/' and '//' must stay distinct, and greedily prefer the longer form
+	// ('//' over two '/' tokens).
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	tokens := loomscript.tokenize("a / b // c % d", arena)
+
+	expected := []loomscript.Token_Kind{
+		.Identifier, .Div, .Identifier, .IntDiv, .Identifier, .Modulo, .Identifier, .EOF,
+	}
+
+	testing.expect_value(t, len(tokens), len(expected))
+	for kind, i in expected {
+		if i >= len(tokens) do break
+		testing.expect_value(t, tokens[i].kind, kind)
+	}
+}
+
+@(test)
+test_tokenize_compound_assign_operators :: proc(t: ^testing.T) {
+	// '//=' is three bytes and must not be split into '//' + '=' or
+	// '/' + '/='.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	tokens := loomscript.tokenize("a += b -= c *= d /= e //= f %= g", arena)
+
+	expected := []loomscript.Token_Kind{
+		.Identifier, .PlusAssign,
+		.Identifier, .MinusAssign,
+		.Identifier, .MultAssign,
+		.Identifier, .DivAssign,
+		.Identifier, .IntDivAssign,
+		.Identifier, .ModuloAssign,
+		.Identifier, .EOF,
+	}
+
+	testing.expect_value(t, len(tokens), len(expected))
+	for kind, i in expected {
+		if i >= len(tokens) do break
+		testing.expect_value(t, tokens[i].kind, kind)
+	}
+
+	int_div_assign := tokens[9]
+	testing.expect_value(t, int_div_assign.text, "//=")
+	testing.expect_value(t, int_div_assign.len, 3)
 }
 
 @(test)
@@ -109,7 +159,7 @@ test_tokenize_newline_is_significant :: proc(t: ^testing.T) {
 	tokens := loomscript.tokenize("1\n2", arena)
 
 	expected := []loomscript.Token_Kind{
-		.IntLiteral, .Newline, .IntLiteral, .EOF,
+		.IntLit, .Newline, .IntLit, .EOF,
 	}
 	testing.expect_value(t, len(tokens), len(expected))
 	for kind, i in expected {

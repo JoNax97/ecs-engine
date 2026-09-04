@@ -125,11 +125,11 @@ push_error :: proc(p: ^Parser, msg: string, tok: Token) {
 @(private)
 binary_precedence :: proc(kind: Token_Kind) -> (prec: int, ok: bool) {
 	#partial switch kind {
-	case .EqEq, .NotEq, .Lt, .LtEq, .Gt, .GtEq:
+	case .Eq, .Neq, .Lt, .LtEq, .Gt, .GtEq:
 		return 1, true
 	case .Plus, .Minus:
 		return 2, true
-	case .Mult:
+	case .Mult, .Div, .IntDiv, .Modulo:
 		return 3, true
 	case:
 		return 0, false
@@ -203,14 +203,14 @@ parse_operand :: proc(p: ^Parser) -> Expr {
 	tok := peek(p)
 
 	#partial switch tok.kind {
-	case .IntLiteral:
+	case .IntLit:
 		advance(p)
 		value, ok := parse_int_literal(tok.text)
 		if !ok {
 			push_error(p, "integer literal too large", tok)
 		}
-		node := new(Expression_IntLiteral, p.allocator)
-		node^ = Expression_IntLiteral{pos = tok.pos, value = value, span = Span{tok.pos, tok.pos + tok.len}}
+		node := new(Expression_IntLit, p.allocator)
+		node^ = Expression_IntLit{pos = tok.pos, value = value, span = Span{tok.pos, tok.pos + tok.len}}
 		return node
 
 	case .Identifier:
@@ -250,13 +250,48 @@ parse_statement :: proc(p: ^Parser) -> Statement {
 		return parse_if_statement(p)
 
 	case .Identifier:
-		if peek_at(p, 1).kind == .Assign {
+		if is_assign_op(peek_at(p, 1).kind) {
 			return parse_assign_Statement(p)
 		}
 		return parse_statement_expression(p)
 
 	case:
 		return parse_statement_expression(p)
+	}
+}
+
+// is_assign_op reports whether kind starts an assign_Statement: plain '='
+// or one of the compound forms ('+=', '-=', '*=', '/=', '//=', '%=').
+@(private)
+is_assign_op :: proc(kind: Token_Kind) -> bool {
+	#partial switch kind {
+	case .Assign, .PlusAssign, .MinusAssign, .MultAssign, .DivAssign, .IntDivAssign, .ModuloAssign:
+		return true
+	case:
+		return false
+	}
+}
+
+// compound_assign_arith_op maps a compound-assign token to the arithmetic
+// operator it stands in for ('+=' -> '+'), so parse_assign_Statement can
+// desugar 'x op= y' into 'x = x op y' without a dedicated AST shape.
+@(private)
+compound_assign_arith_op :: proc(kind: Token_Kind) -> (op: Token_Kind, ok: bool) {
+	#partial switch kind {
+	case .PlusAssign:
+		return .Plus, true
+	case .MinusAssign:
+		return .Minus, true
+	case .MultAssign:
+		return .Mult, true
+	case .DivAssign:
+		return .Div, true
+	case .IntDivAssign:
+		return .IntDiv, true
+	case .ModuloAssign:
+		return .Modulo, true
+	case:
+		return .Assign, false
 	}
 }
 
@@ -296,15 +331,43 @@ parse_let_Statement :: proc(p: ^Parser) -> Statement {
 	return node
 }
 
-// assign_Statement := Ident '=' expr
+// assign_Statement := Ident ('=' | '+=' | '-=' | '*=' | '/=' | '//=' | '%=') expr
+// A compound form desugars to a plain assignment whose value is the
+// corresponding BinaryOp ('x += y' becomes the same shape as 'x = x + y'),
+// so there is no dedicated AST node for compound assignment.
 @(private)
 parse_assign_Statement :: proc(p: ^Parser) -> Statement {
 	name_tok := advance(p) // Ident
-	eq_tok := advance(p) // '='
+	op_tok := advance(p) // '=' or a compound-assign operator
 
-	value := parse_binary_op(p, 0)
+	rhs := parse_binary_op(p, 0)
 
-	end := eq_tok.pos + eq_tok.len
+	value := rhs
+	if arith_op, is_compound := compound_assign_arith_op(op_tok.kind); is_compound {
+		target := new(Expression_Identifier, p.allocator)
+		target^ = Expression_Identifier{
+			pos  = name_tok.pos,
+			name = name_tok.text,
+			span = Span{name_tok.pos, name_tok.pos + name_tok.len},
+		}
+
+		end := op_tok.pos + op_tok.len
+		if rhs != nil {
+			end = expr_span(rhs).end
+		}
+
+		bin := new(Expression_BinaryOp, p.allocator)
+		bin^ = Expression_BinaryOp{
+			pos   = op_tok.pos,
+			op    = arith_op,
+			left  = target,
+			right = rhs,
+			span  = Span{start = name_tok.pos, end = end},
+		}
+		value = bin
+	}
+
+	end := op_tok.pos + op_tok.len
 	if value != nil {
 		end = expr_span(value).end
 	}
