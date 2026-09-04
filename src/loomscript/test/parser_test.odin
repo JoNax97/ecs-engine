@@ -129,6 +129,58 @@ test_parse_precedence_div_and_mod_over_add :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_parse_comparison_binds_looser_than_arithmetic :: proc(t: ^testing.T) {
+	// "1 + 2 > 3" must group as (1 + 2) > 3, not 1 + (2 > 3).
+	arena := make_test_arena(t)
+	defer free_all(arena)
+	expr, errors := parse_src(t, arena, "1 + 2 > 3")
+	testing.expect_value(t, len(errors), 0)
+
+	outer := as_binary(t, expr)
+	testing.expect_value(t, outer.op, loomscript.Token_Kind.Gt)
+	testing.expect_value(t, as_int(t, outer.right).value, 3)
+
+	inner := as_binary(t, outer.left)
+	testing.expect_value(t, inner.op, loomscript.Token_Kind.Plus)
+	testing.expect_value(t, as_int(t, inner.left).value, 1)
+	testing.expect_value(t, as_int(t, inner.right).value, 2)
+}
+
+@(test)
+test_parse_multiplicative_tier_left_to_right :: proc(t: ^testing.T) {
+	// "8 / 4 * 2": Mult/Div/IntDiv/Modulo share one precedence tier and
+	// must still associate left-to-right, same as Plus/Minus do.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+	expr, errors := parse_src(t, arena, "8 / 4 * 2")
+	testing.expect_value(t, len(errors), 0)
+
+	outer := as_binary(t, expr)
+	testing.expect_value(t, outer.op, loomscript.Token_Kind.Mult)
+	testing.expect_value(t, as_int(t, outer.right).value, 2)
+
+	inner := as_binary(t, outer.left)
+	testing.expect_value(t, inner.op, loomscript.Token_Kind.Div)
+	testing.expect_value(t, as_int(t, inner.left).value, 8)
+	testing.expect_value(t, as_int(t, inner.right).value, 4)
+}
+
+@(test)
+test_parse_binary_op_span_covers_full_width_pos_is_operator :: proc(t: ^testing.T) {
+	// A binary op's 'pos' marks the operator specifically (the '+' at
+	// index 2, in the middle), while 'span' covers the whole expression
+	// from the left operand's start to the right operand's end.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+	expr, errors := parse_src(t, arena, "1 + 22")
+	testing.expect_value(t, len(errors), 0)
+
+	node := as_binary(t, expr)
+	testing.expect_value(t, node.pos, 2)
+	testing.expect_value(t, node.span, loomscript.Span{start = 0, end = 6})
+}
+
+@(test)
 test_parse_parens_override_precedence :: proc(t: ^testing.T) {
 	// "(2 + 3) * 4" must group as (2 + 3) * 4, parens beat operator precedence.
 	arena := make_test_arena(t)

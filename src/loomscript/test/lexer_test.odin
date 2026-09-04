@@ -120,6 +120,49 @@ test_tokenize_division_operators :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_tokenize_comparison_operators :: proc(t: ^testing.T) {
+	// '=' vs '==' and '!' + '=' (there is no bare '!') must resolve to
+	// distinct single tokens, same greedy-longest-match rule as division.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	tokens := loomscript.tokenize("a == b != c < d <= e > f >= g", arena)
+
+	expected := []loomscript.Token_Kind{
+		.Identifier, .Eq,
+		.Identifier, .Neq,
+		.Identifier, .Lt,
+		.Identifier, .LtEq,
+		.Identifier, .Gt,
+		.Identifier, .GtEq,
+		.Identifier, .EOF,
+	}
+
+	testing.expect_value(t, len(tokens), len(expected))
+	for kind, i in expected {
+		if i >= len(tokens) do break
+		testing.expect_value(t, tokens[i].kind, kind)
+	}
+}
+
+@(test)
+test_tokenize_token_len_matches_text :: proc(t: ^testing.T) {
+	// len is derived from the same start/end offsets as text in every
+	// make_token call — spot-check a single-byte and multi-byte token so
+	// that invariant has at least one direct assertion.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	tokens := loomscript.tokenize("+ ==", arena)
+
+	testing.expect_value(t, tokens[0].kind, loomscript.Token_Kind.Plus)
+	testing.expect_value(t, tokens[0].len, 1)
+
+	testing.expect_value(t, tokens[1].kind, loomscript.Token_Kind.Eq)
+	testing.expect_value(t, tokens[1].len, 2)
+}
+
+@(test)
 test_tokenize_compound_assign_operators :: proc(t: ^testing.T) {
 	// '//=' is three bytes and must not be split into '//' + '=' or
 	// '/' + '/='.

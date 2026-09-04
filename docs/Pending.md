@@ -700,6 +700,15 @@ Open:
 
 When settled, update the [Enums](Language%20Spec.md#enums) example, whose `when Nothing` arm carries a `| no-op` comment where a keyword would be clearer.
 
+### Chained comparisons
+status: pending · importance: 2 · tags: syntax
+
+[Operators](Language%20Spec.md#operators) lists `== != < <= > >=` but never says whether they chain. Undecided between two readings of `a < b < c`: non-associative (a syntax error — comparisons produce a value nothing else compares against) or Python-style sugar for `a < b and b < c`.
+
+Python chaining is the interesting option to explore before deciding against it: it reads naturally for range checks (`0 <= x < max`), a common pattern here given range-typed fields. Costs a real desugaring rule (each operand evaluated once, not twice) rather than a grammar tweak.
+
+Currently unenforced either way — the implementation gives every comparison operator one shared precedence tier with no chain restriction, so `a == b != c` parses today without either semantics backing it.
+
 ### Alternative ternary syntax
 status: idea · importance: 1 · tags: syntax
 

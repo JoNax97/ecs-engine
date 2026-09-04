@@ -133,6 +133,18 @@ test_parse_program_let_missing_value_errors :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_parse_program_let_rejects_compound_assign :: proc(t: ^testing.T) {
+	// A fresh 'let' declaration has nothing to compound against — only
+	// plain '=' is valid after the name, never '+=' or its siblings.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	_, errors := parse_prog_src(t, arena, "let x += 1")
+	testing.expect_value(t, len(errors), 1)
+	testing.expect_value(t, errors[0].msg, "expected '=' in let statement")
+}
+
+@(test)
 test_parse_program_let_missing_ident_errors :: proc(t: ^testing.T) {
 	arena := make_test_arena(t)
 	defer free_all(arena)
@@ -140,6 +152,8 @@ test_parse_program_let_missing_ident_errors :: proc(t: ^testing.T) {
 	program, errors := parse_prog_src(t, arena, "let = 5")
 	testing.expect_value(t, len(errors), 1)
 	testing.expect_value(t, errors[0].msg, "expected identifier after 'let'")
+	testing.expect_value(t, errors[0].pos, 4) // the '=' the parser choked on
+	testing.expect_value(t, errors[0].len, 1)
 }
 
 @(test)
@@ -210,6 +224,30 @@ test_parse_program_if_else_if_chain :: proc(t: ^testing.T) {
 	if !ok2 do return
 	testing.expect_value(t, len(inner.then_body), 1)
 	testing.expect_value(t, len(inner.else_body), 1)
+}
+
+@(test)
+test_parse_program_if_else_if_span :: proc(t: ^testing.T) {
+	// The outermost node's span runs through the shared closing 'end'
+	// (it's the one that actually consumes the token); the nested
+	// 'else if' node's span stops at its own body, excluding 'end'.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	src := "if x == 0\n\ty = 1\nelse if x == 1\n\ty = 2\nelse\n\ty = 3\nend"
+	program, errors := parse_prog_src(t, arena, src)
+	testing.expect_value(t, len(errors), 0)
+
+	outer, ok := program[0].(^loomscript.Statement_If)
+	testing.expect(t, ok, "expected Statement_If")
+	if !ok do return
+	testing.expect_value(t, outer.span, loomscript.Span{start = 0, end = len(src)})
+
+	inner, ok2 := outer.else_body[0].(^loomscript.Statement_If)
+	testing.expect(t, ok2, "expected nested Statement_If for 'else if'")
+	if !ok2 do return
+	testing.expect_value(t, inner.span.start, 22) // pos of the nested 'if'
+	testing.expect(t, inner.span.end < outer.span.end, "nested span must not reach through 'end'")
 }
 
 @(test)

@@ -119,7 +119,7 @@ Expression_IntLit :: struct {
 
 Expression_BinaryOp :: struct {
 	using base: Node_Base, // pos of the operator token — sits inside the span, not at its start
-	op:         Token_Kind, // Plus, Minus, Mult
+	op:         Token_Kind, // Plus, Minus, Mult, Div, IntDiv, Modulo, Eq, Neq, Lt, LtEq, Gt, GtEq
 	left:       Expr,
 	right:      Expr,
 }
