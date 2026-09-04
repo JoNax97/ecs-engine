@@ -14,7 +14,11 @@ Parser :: struct {
 	allocator: mem.Allocator,
 }
 
-parse :: proc(tokens: []Token, allocator := context.allocator) -> (expr: Expr, errors: []Parse_Error) {
+// parse parses a whole file: a flat list of statements separated by one or
+// more newlines. Blank lines (runs of Newline tokens) are tolerated anywhere.
+// A single bare expression is valid input too — it just parses as a
+// one-statement Program holding a Statement_Expr.
+parse :: proc(tokens: []Token, allocator := context.allocator) -> (program: Program, errors: []Parse_Error) {
 	p := Parser{
 		tokens    = tokens,
 		pos       = 0,
@@ -22,14 +26,44 @@ parse :: proc(tokens: []Token, allocator := context.allocator) -> (expr: Expr, e
 		allocator = allocator,
 	}
 
-	expr = parse_binary(&p, 0)
+	statements := make([dynamic]Statement, allocator)
 
-	trailing := peek(&p)
-	if trailing.kind != .EOF {
-		push_error(&p, "unexpected trailing input", trailing.pos)
+	skip_newlines(&p)
+	for peek(&p).kind != .EOF {
+		errors_before := len(p.errors)
+		stmt := parse_statement(&p)
+		if stmt != nil {
+			append(&statements, stmt)
+		}
+
+		tok := peek(&p)
+		if tok.kind == .EOF {
+			break
+		}
+
+		if tok.kind != .Newline {
+			// Only report "expected newline" if the statement itself parsed
+			// cleanly — if parse_Statement already pushed an error, the parser's
+			// position is already unsynced because of that error, and a
+			// second error here would just be noise pointing at the same
+			// root cause.
+			if len(p.errors) == errors_before {
+				push_error(&p, "expected newline after statement", tok.pos)
+			}
+			// recovery: skip to the next newline (or EOF) so one bad
+			// statement doesn't cascade errors through the rest of the file.
+			// This can only synchronize on a newline — two statements
+			// crammed onto one line with no separator at all will have the
+			// second one silently swallowed by this skip, since there is no
+			// other sync point to recover on.
+			for peek(&p).kind != .Newline && peek(&p).kind != .EOF {
+				advance(&p)
+			}
+		}
+		skip_newlines(&p)
 	}
 
-	return expr, p.errors[:]
+	return statements[:], p.errors[:]
 }
 
 // parse_int_literal accumulates digits with an overflow check on each step
@@ -56,12 +90,28 @@ peek :: proc(p: ^Parser) -> Token {
 }
 
 @(private)
+peek_at :: proc(p: ^Parser, offset: int) -> Token {
+	i := p.pos + offset
+	if i >= len(p.tokens) {
+		return p.tokens[len(p.tokens) - 1] // EOF is always last
+	}
+	return p.tokens[i]
+}
+
+@(private)
 advance :: proc(p: ^Parser) -> Token {
 	tok := p.tokens[p.pos]
 	if tok.kind != .EOF {
 		p.pos += 1
 	}
 	return tok
+}
+
+@(private)
+skip_newlines :: proc(p: ^Parser) {
+	for peek(p).kind == .Newline {
+		advance(p)
+	}
 }
 
 @(private)
@@ -87,8 +137,8 @@ binary_precedence :: proc(kind: Token_Kind) -> (prec: int, ok: bool) {
 // operator whose precedence is >= min_prec, recursing at prec+1 for the
 // right-hand side so operators are left-associative.
 @(private)
-parse_binary :: proc(p: ^Parser, min_prec: int) -> Expr {
-	left := parse_unary(p)
+parse_binary_op :: proc(p: ^Parser, min_prec: int) -> Expr {
+	left := parse_unary_op(p)
 
 	for {
 		tok := peek(p)
@@ -97,56 +147,62 @@ parse_binary :: proc(p: ^Parser, min_prec: int) -> Expr {
 			break
 		}
 		advance(p)
-		right := parse_binary(p, prec + 1)
+		right := parse_binary_op(p, prec + 1)
 
-		node := new(Expr_Binary, p.allocator)
-		node^ = Expr_Binary{pos = tok.pos, op = tok.kind, left = left, right = right}
+		node := new(Expression_BinaryOp, p.allocator)
+		node^ = Expression_BinaryOp{pos = tok.pos, op = tok.kind, left = left, right = right}
 		left = node
 	}
 
 	return left
 }
 
-// unary := ('+' | '-') unary | primary
+// unary := ('+' | '-') unary | operand
 // Binds tighter than any binary operator (so "-2 * 3" is "(-2) * 3", not
-// "-(2 * 3)"); recurses on itself, not primary, so "--4" chains.
+// "-(2 * 3)"); recurses on itself, not operand, so "--4" chains.
 @(private)
-parse_unary :: proc(p: ^Parser) -> Expr {
+parse_unary_op :: proc(p: ^Parser) -> Expr {
 	tok := peek(p)
 
 	#partial switch tok.kind {
 	case .Plus, .Minus:
 		advance(p)
-		operand := parse_unary(p)
+		operand := parse_unary_op(p)
 
-		node := new(Expr_Unary, p.allocator)
-		node^ = Expr_Unary{pos = tok.pos, op = tok.kind, operand = operand}
+		node := new(Expression_UnaryOp, p.allocator)
+		node^ = Expression_UnaryOp{pos = tok.pos, op = tok.kind, operand = operand}
 		return node
 
 	case:
-		return parse_primary(p)
+		return parse_operand(p)
 	}
 }
 
-// primary := Int_Lit | '(' expr ')'
+// operand := Int_Lit | Identifier | '(' expr ')'
 @(private)
-parse_primary :: proc(p: ^Parser) -> Expr {
+parse_operand :: proc(p: ^Parser) -> Expr {
 	tok := peek(p)
 
 	#partial switch tok.kind {
-	case .Int_Lit:
+	case .IntLiteral:
 		advance(p)
 		value, ok := parse_int_literal(tok.text)
 		if !ok {
 			push_error(p, "integer literal too large", tok.pos)
 		}
-		node := new(Expr_Int_Lit, p.allocator)
-		node^ = Expr_Int_Lit{pos = tok.pos, value = value}
+		node := new(Expression_IntLiteral, p.allocator)
+		node^ = Expression_IntLiteral{pos = tok.pos, value = value}
+		return node
+
+	case .Identifier:
+		advance(p)
+		node := new(Expression_Identifier, p.allocator)
+		node^ = Expression_Identifier{pos = tok.pos, name = tok.text}
 		return node
 
 	case .LParen:
 		advance(p)
-		inner := parse_binary(p, 0)
+		inner := parse_binary_op(p, 0)
 		closing := peek(p)
 		if closing.kind != .RParen {
 			push_error(p, "expected ')'", closing.pos)
@@ -160,4 +216,74 @@ parse_primary :: proc(p: ^Parser) -> Expr {
 		advance(p)
 		return nil
 	}
+}
+
+// Statement := let_Statement | assign_Statement | Expression_Statement
+@(private)
+parse_statement :: proc(p: ^Parser) -> Statement {
+	tok := peek(p)
+
+	#partial switch tok.kind {
+	case .Let:
+		return parse_let_Statement(p)
+
+	case .Identifier:
+		if peek_at(p, 1).kind == .Assign {
+			return parse_assign_Statement(p)
+		}
+		return parse_statement_expression(p)
+
+	case:
+		return parse_statement_expression(p)
+	}
+}
+
+// let_Statement := 'let' Ident '=' expr
+@(private)
+parse_let_Statement :: proc(p: ^Parser) -> Statement {
+	let_tok := advance(p) // 'let'
+
+	name_tok := peek(p)
+	if name_tok.kind != .Identifier {
+		push_error(p, "expected identifier after 'let'", name_tok.pos)
+		return nil
+	}
+	advance(p)
+
+	eq_tok := peek(p)
+	if eq_tok.kind != .Assign {
+		push_error(p, "expected '=' in let statement", eq_tok.pos)
+		return nil
+	}
+	advance(p)
+
+	value := parse_binary_op(p, 0)
+
+	node := new(Statement_Declaration, p.allocator)
+	node^ = Statement_Declaration{pos = let_tok.pos, name = name_tok.text, value = value}
+	return node
+}
+
+// assign_Statement := Ident '=' expr
+@(private)
+parse_assign_Statement :: proc(p: ^Parser) -> Statement {
+	name_tok := advance(p) // Ident
+	advance(p) // '='
+
+	value := parse_binary_op(p, 0)
+
+	node := new(Statement_Assignment, p.allocator)
+	node^ = Statement_Assignment{pos = name_tok.pos, name = name_tok.text, value = value}
+	return node
+}
+
+// Expression_Statement := expr
+@(private)
+parse_statement_expression :: proc(p: ^Parser) -> Statement {
+	tok := peek(p)
+	expr := parse_binary_op(p, 0)
+
+	node := new(Statement_Expression, p.allocator)
+	node^ = Statement_Expression{pos = tok.pos, expr = expr}
+	return node
 }

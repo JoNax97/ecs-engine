@@ -1,12 +1,16 @@
 package loomscript
 
 Token_Kind :: enum {
-	Int_Lit,
+	IntLiteral,
+	Identifier,
+	Let,
 	Plus,
 	Minus,
 	Star,
+	Assign,
 	LParen,
 	RParen,
+	Newline,
 	EOF,
 }
 

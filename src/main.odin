@@ -2,17 +2,17 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "core:strings"
+import "core:sys/posix"
 
 import "loomscript"
 
 main :: proc() {
-	if len(os.args) < 2 {
-		fmt.eprintln("usage: loomscript_cli <source>")
+	src, ok := read_source()
+	if !ok {
+		fmt.eprintln("usage: loomscript_cli <file>   (or pipe source on stdin)")
 		os.exit(1)
 	}
 
-	src := strings.join(os.args[1:], " ")
 	tokens := loomscript.tokenize(src)
 
 	fmt.println("-- tokens --")
@@ -20,10 +20,10 @@ main :: proc() {
 		fmt.printfln("%-10v %-10q pos=%d", tok.kind, tok.text, tok.pos)
 	}
 
-	expr, errors := loomscript.parse(tokens)
+	program, errors := loomscript.parse(tokens)
 
 	fmt.println("-- ast --")
-	fmt.print(loomscript.format_expr(expr))
+	fmt.print(loomscript.format_program(program))
 
 	if len(errors) > 0 {
 		fmt.println("-- errors --")
@@ -32,4 +32,33 @@ main :: proc() {
 		}
 		os.exit(1)
 	}
+}
+
+// read_source reads a file named on argv[1], or the whole of stdin when no
+// argument is given (so both `loomscript_cli file.lms` and
+// `echo '...' | loomscript_cli` / `loomscript_cli < file.lms` work).
+read_source :: proc() -> (src: string, ok: bool) {
+	if len(os.args) >= 2 {
+		data, err := os.read_entire_file(os.args[1], context.allocator)
+		if err != nil {
+			fmt.eprintfln("error: could not read '%s': %v", os.args[1], err)
+			return "", false
+		}
+		return string(data), true
+	}
+
+	// With no file argument, stdin must be piped/redirected data, not an
+	// interactive terminal — otherwise read_entire_file blocks waiting for
+	// input that will never come (no EOF until the user hits Ctrl+D, which
+	// looks like a hang, not an error).
+	if posix.isatty(posix.FD(os.fd(os.stdin))) {
+		return "", false
+	}
+
+	data, err := os.read_entire_file(os.stdin, context.allocator)
+	if err != nil {
+		fmt.eprintfln("error: could not read stdin: %v", err)
+		return "", false
+	}
+	return string(data), true
 }

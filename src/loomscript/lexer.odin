@@ -9,7 +9,7 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 	for pos < len(src) {
 		c := src[pos]
 
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+		if c == ' ' || c == '\t' || c == '\r' {
 			pos += 1
 			continue
 		}
@@ -17,11 +17,26 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 		start := pos
 
 		switch {
+		case c == '\n':
+			pos += 1
+			append(&tokens, Token{kind = .Newline, text = src[start:pos], pos = start})
+
 		case unicode.is_digit(rune(c)):
 			for pos < len(src) && unicode.is_digit(rune(src[pos])) {
 				pos += 1
 			}
-			append(&tokens, Token{kind = .Int_Lit, text = src[start:pos], pos = start})
+			append(&tokens, Token{kind = .IntLiteral, text = src[start:pos], pos = start})
+
+		case is_ident_start(rune(c)):
+			for pos < len(src) && is_ident_continue(rune(src[pos])) {
+				pos += 1
+			}
+			text := src[start:pos]
+			kind := Token_Kind.Identifier
+			if text == "let" {
+				kind = .Let
+			}
+			append(&tokens, Token{kind = kind, text = text, pos = start})
 
 		case c == '+':
 			pos += 1
@@ -43,6 +58,10 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 			pos += 1
 			append(&tokens, Token{kind = .RParen, text = src[start:pos], pos = start})
 
+		case c == '=':
+			pos += 1
+			append(&tokens, Token{kind = .Assign, text = src[start:pos], pos = start})
+
 		case:
 			// unknown byte, skip for now (no error handling yet)
 			pos += 1
@@ -51,4 +70,14 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 
 	append(&tokens, Token{kind = .EOF, text = "", pos = pos})
 	return tokens[:]
+}
+
+@(private)
+is_ident_start :: proc(r: rune) -> bool {
+	return r == '_' || unicode.is_alpha(r)
+}
+
+@(private)
+is_ident_continue :: proc(r: rune) -> bool {
+	return r == '_' || unicode.is_alpha(r) || unicode.is_digit(r)
 }

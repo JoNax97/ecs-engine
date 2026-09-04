@@ -6,23 +6,41 @@ import "core:testing"
 import "../"
 
 @(private = "file")
-as_binary :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expr_Binary {
-	node, ok := e.(^loomscript.Expr_Binary)
-	testing.expect(t, ok, "expected Expr_Binary")
+as_binary :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expression_BinaryOp {
+	node, ok := e.(^loomscript.Expression_BinaryOp)
+	testing.expect(t, ok, "expected Expression_BinaryOp")
 	return node
 }
 
 @(private = "file")
-as_int :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expr_Int_Lit {
-	node, ok := e.(^loomscript.Expr_Int_Lit)
-	testing.expect(t, ok, "expected Expr_Int_Lit")
+as_int :: proc(t: ^testing.T, e: loomscript.Expr) -> ^loomscript.Expression_IntLiteral {
+	node, ok := e.(^loomscript.Expression_IntLiteral)
+	testing.expect(t, ok, "expected Expression_IntLiteral")
 	return node
 }
 
+// parse_src parses src as a program and unwraps the single expression
+// statement it's expected to produce — these tests exercise expression
+// parsing specifically (precedence, associativity, error recovery inside an
+// expression), not the statement/program layer, which has its own tests in
+// program_test.odin.
 @(private = "file")
 parse_src :: proc(t: ^testing.T, arena: mem.Allocator, src: string) -> (loomscript.Expr, []loomscript.Parse_Error) {
 	tokens := loomscript.tokenize(src, arena)
-	return loomscript.parse(tokens, arena)
+	program, errors := loomscript.parse(tokens, arena)
+
+	testing.expect_value(t, len(program), 1)
+	if len(program) != 1 {
+		return nil, errors
+	}
+
+	stmt, ok := program[0].(^loomscript.Statement_Expression)
+	testing.expect(t, ok, "expected Statement_Expression")
+	if !ok {
+		return nil, errors
+	}
+
+	return stmt.expr, errors
 }
 
 @(test)
@@ -117,17 +135,6 @@ test_parse_nested_parens :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_parse_empty_input :: proc(t: ^testing.T) {
-	arena := make_test_arena(t)
-	defer free_all(arena)
-	expr, errors := parse_src(t, arena, "")
-	testing.expect_value(t, expr, nil)
-	testing.expect_value(t, len(errors), 1)
-	testing.expect_value(t, errors[0].msg, "expected expression")
-	testing.expect_value(t, errors[0].pos, 0)
-}
-
-@(test)
 test_parse_unmatched_open_paren :: proc(t: ^testing.T) {
 	// "(2 + 3" never closes: error, but the inner expr still comes back
 	// (best-effort partial AST, not a hard abort).
@@ -173,8 +180,8 @@ test_parse_unary_minus :: proc(t: ^testing.T) {
 	expr, errors := parse_src(t, arena, "-4")
 	testing.expect_value(t, len(errors), 0)
 
-	node, ok := expr.(^loomscript.Expr_Unary)
-	testing.expect(t, ok, "expected Expr_Unary")
+	node, ok := expr.(^loomscript.Expression_UnaryOp)
+	testing.expect(t, ok, "expected Expression_UnaryOp")
 	testing.expect_value(t, node.op, loomscript.Token_Kind.Minus)
 	testing.expect_value(t, as_int(t, node.operand).value, 4)
 }
@@ -190,8 +197,8 @@ test_parse_unary_binds_tighter_than_mul :: proc(t: ^testing.T) {
 	outer := as_binary(t, expr)
 	testing.expect_value(t, outer.op, loomscript.Token_Kind.Star)
 
-	left, ok := outer.left.(^loomscript.Expr_Unary)
-	testing.expect(t, ok, "expected Expr_Unary")
+	left, ok := outer.left.(^loomscript.Expression_UnaryOp)
+	testing.expect(t, ok, "expected Expression_UnaryOp")
 	testing.expect_value(t, left.op, loomscript.Token_Kind.Minus)
 	testing.expect_value(t, as_int(t, left.operand).value, 2)
 
@@ -206,12 +213,12 @@ test_parse_unary_chains :: proc(t: ^testing.T) {
 	expr, errors := parse_src(t, arena, "--4")
 	testing.expect_value(t, len(errors), 0)
 
-	outer, ok := expr.(^loomscript.Expr_Unary)
-	testing.expect(t, ok, "expected Expr_Unary")
+	outer, ok := expr.(^loomscript.Expression_UnaryOp)
+	testing.expect(t, ok, "expected Expression_UnaryOp")
 	testing.expect_value(t, outer.op, loomscript.Token_Kind.Minus)
 
-	inner, ok2 := outer.operand.(^loomscript.Expr_Unary)
-	testing.expect(t, ok2, "expected inner Expr_Unary")
+	inner, ok2 := outer.operand.(^loomscript.Expression_UnaryOp)
+	testing.expect(t, ok2, "expected inner Expression_UnaryOp")
 	testing.expect_value(t, inner.op, loomscript.Token_Kind.Minus)
 	testing.expect_value(t, as_int(t, inner.operand).value, 4)
 }
@@ -228,22 +235,24 @@ test_parse_binary_op_with_unary_rhs :: proc(t: ^testing.T) {
 	testing.expect_value(t, outer.op, loomscript.Token_Kind.Plus)
 	testing.expect_value(t, as_int(t, outer.left).value, 2)
 
-	right, ok := outer.right.(^loomscript.Expr_Unary)
-	testing.expect(t, ok, "expected Expr_Unary")
+	right, ok := outer.right.(^loomscript.Expression_UnaryOp)
+	testing.expect(t, ok, "expected Expression_UnaryOp")
 	testing.expect_value(t, right.op, loomscript.Token_Kind.Minus)
 	testing.expect_value(t, as_int(t, right.operand).value, 4)
 }
 
 @(test)
 test_parse_trailing_input_is_rejected :: proc(t: ^testing.T) {
-	// "1 2": a full expr parses as just "1", but "2" is leftover garbage
-	// that must be reported, not silently dropped.
+	// "1 2": a full expr parses as just "1", but "2" is leftover garbage on
+	// the same line — the statement layer reports it as a missing separator
+	// (there's no longer a distinct "trailing input" concept now that
+	// expression parsing always runs inside the statement/program layer).
 	arena := make_test_arena(t)
 	defer free_all(arena)
 	expr, errors := parse_src(t, arena, "1 2")
 	testing.expect_value(t, as_int(t, expr).value, 1)
 	testing.expect_value(t, len(errors), 1)
-	testing.expect_value(t, errors[0].msg, "unexpected trailing input")
+	testing.expect_value(t, errors[0].msg, "expected newline after statement")
 	testing.expect_value(t, errors[0].pos, 2)
 }
 
