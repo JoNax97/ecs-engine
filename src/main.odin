@@ -13,6 +13,9 @@ main :: proc() {
 		os.exit(1)
 	}
 
+	fmt.println("-- source --")
+	fmt.println(src)
+
 	tokens := loomscript.tokenize(src)
 
 	fmt.println("-- tokens --")

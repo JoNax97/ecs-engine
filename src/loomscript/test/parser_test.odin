@@ -102,7 +102,7 @@ test_parse_precedence_mul_over_add :: proc(t: ^testing.T) {
 	testing.expect_value(t, as_int(t, outer.left).value, 2)
 
 	inner := as_binary(t, outer.right)
-	testing.expect_value(t, inner.op, loomscript.Token_Kind.Star)
+	testing.expect_value(t, inner.op, loomscript.Token_Kind.Mult)
 	testing.expect_value(t, as_int(t, inner.left).value, 3)
 	testing.expect_value(t, as_int(t, inner.right).value, 4)
 }
@@ -116,7 +116,7 @@ test_parse_parens_override_precedence :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errors), 0)
 
 	outer := as_binary(t, expr)
-	testing.expect_value(t, outer.op, loomscript.Token_Kind.Star)
+	testing.expect_value(t, outer.op, loomscript.Token_Kind.Mult)
 	testing.expect_value(t, as_int(t, outer.right).value, 4)
 
 	inner := as_binary(t, outer.left)
@@ -195,7 +195,7 @@ test_parse_unary_binds_tighter_than_mul :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errors), 0)
 
 	outer := as_binary(t, expr)
-	testing.expect_value(t, outer.op, loomscript.Token_Kind.Star)
+	testing.expect_value(t, outer.op, loomscript.Token_Kind.Mult)
 
 	left, ok := outer.left.(^loomscript.Expression_UnaryOp)
 	testing.expect(t, ok, "expected Expression_UnaryOp")

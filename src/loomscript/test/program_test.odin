@@ -141,3 +141,83 @@ test_parse_program_let_missing_ident_errors :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errors), 1)
 	testing.expect_value(t, errors[0].msg, "expected identifier after 'let'")
 }
+
+@(test)
+test_parse_program_if_statement :: proc(t: ^testing.T) {
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	program, errors := parse_prog_src(t, arena, "if x > 0\n\tx = 1\nend")
+	testing.expect_value(t, len(errors), 0)
+	testing.expect_value(t, len(program), 1)
+
+	stmt, ok := program[0].(^loomscript.Statement_If)
+	testing.expect(t, ok, "expected Statement_If")
+	if !ok do return
+
+	cond, ok2 := stmt.cond.(^loomscript.Expression_BinaryOp)
+	testing.expect(t, ok2, "expected condition to be Expression_BinaryOp")
+	if ok2 {
+		testing.expect_value(t, cond.op, loomscript.Token_Kind.Gt)
+	}
+
+	testing.expect_value(t, len(stmt.then_body), 1)
+	testing.expect(t, stmt.else_body == nil, "expected no else_body")
+}
+
+@(test)
+test_parse_program_if_else :: proc(t: ^testing.T) {
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	program, errors := parse_prog_src(t, arena, "if x == 0\n\ty = 1\nelse\n\ty = 2\nend")
+	testing.expect_value(t, len(errors), 0)
+	testing.expect_value(t, len(program), 1)
+
+	stmt, ok := program[0].(^loomscript.Statement_If)
+	testing.expect(t, ok, "expected Statement_If")
+	if !ok do return
+
+	testing.expect_value(t, len(stmt.then_body), 1)
+	testing.expect_value(t, len(stmt.else_body), 1)
+
+	_, ok2 := stmt.else_body[0].(^loomscript.Statement_Assignment)
+	testing.expect(t, ok2, "expected else body to hold a Statement_Assignment")
+}
+
+@(test)
+test_parse_program_if_else_if_chain :: proc(t: ^testing.T) {
+	// 'else if' is a Statement_If nested in else_body; the whole chain
+	// closes on the single trailing 'end', not one per branch.
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	program, errors := parse_prog_src(
+		t,
+		arena,
+		"if x == 0\n\ty = 1\nelse if x == 1\n\ty = 2\nelse\n\ty = 3\nend",
+	)
+	testing.expect_value(t, len(errors), 0)
+	testing.expect_value(t, len(program), 1)
+
+	outer, ok := program[0].(^loomscript.Statement_If)
+	testing.expect(t, ok, "expected Statement_If")
+	if !ok do return
+	testing.expect_value(t, len(outer.else_body), 1)
+
+	inner, ok2 := outer.else_body[0].(^loomscript.Statement_If)
+	testing.expect(t, ok2, "expected nested Statement_If for 'else if'")
+	if !ok2 do return
+	testing.expect_value(t, len(inner.then_body), 1)
+	testing.expect_value(t, len(inner.else_body), 1)
+}
+
+@(test)
+test_parse_program_if_missing_end_errors :: proc(t: ^testing.T) {
+	arena := make_test_arena(t)
+	defer free_all(arena)
+
+	_, errors := parse_prog_src(t, arena, "if x > 0\n\ty = 1")
+	testing.expect_value(t, len(errors), 1)
+	testing.expect_value(t, errors[0].msg, "expected 'end' to close 'if'")
+}

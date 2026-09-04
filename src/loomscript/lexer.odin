@@ -33,8 +33,15 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 			}
 			text := src[start:pos]
 			kind := Token_Kind.Identifier
-			if text == "let" {
+			switch text {
+			case "let":
 				kind = .Let
+			case "if":
+				kind = .If
+			case "else":
+				kind = .Else
+			case "end":
+				kind = .End
 			}
 			append(&tokens, Token{kind = kind, text = text, pos = start})
 
@@ -48,7 +55,7 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 
 		case c == '*':
 			pos += 1
-			append(&tokens, Token{kind = .Star, text = src[start:pos], pos = start})
+			append(&tokens, Token{kind = .Mult, text = src[start:pos], pos = start})
 
 		case c == '(':
 			pos += 1
@@ -60,7 +67,34 @@ tokenize :: proc(src: string, allocator := context.allocator) -> []Token {
 
 		case c == '=':
 			pos += 1
-			append(&tokens, Token{kind = .Assign, text = src[start:pos], pos = start})
+			kind := Token_Kind.Assign
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .EqEq
+			}
+			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
+
+		case c == '!' && pos + 1 < len(src) && src[pos + 1] == '=':
+			pos += 2
+			append(&tokens, Token{kind = .NotEq, text = src[start:pos], pos = start})
+
+		case c == '<':
+			pos += 1
+			kind := Token_Kind.Lt
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .LtEq
+			}
+			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
+
+		case c == '>':
+			pos += 1
+			kind := Token_Kind.Gt
+			if pos < len(src) && src[pos] == '=' {
+				pos += 1
+				kind = .GtEq
+			}
+			append(&tokens, Token{kind = kind, text = src[start:pos], pos = start})
 
 		case:
 			// unknown byte, skip for now (no error handling yet)

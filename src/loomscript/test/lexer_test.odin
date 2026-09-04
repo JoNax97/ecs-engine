@@ -21,7 +21,7 @@ test_tokenize_simple_expr :: proc(t: ^testing.T) {
 	tokens := loomscript.tokenize("12 + (3 * 4)", arena)
 
 	expected := []loomscript.Token_Kind{
-		.IntLiteral, .Plus, .LParen, .IntLiteral, .Star, .IntLiteral, .RParen, .EOF,
+		.IntLiteral, .Plus, .LParen, .IntLiteral, .Mult, .IntLiteral, .RParen, .EOF,
 	}
 
 	testing.expect_value(t, len(tokens), len(expected))

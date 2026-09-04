@@ -3,10 +3,13 @@ package loomscript
 // A program is a flat list of statements; there is no enclosing node.
 Program :: []Statement
 
+// Statements
+
 Statement :: union {
 	^Statement_Declaration,
 	^Statement_Assignment,
 	^Statement_Expression,
+	^Statement_If,
 }
 
 Statement_Declaration :: struct {
@@ -25,6 +28,20 @@ Statement_Expression :: struct {
 	pos:  int,
 	expr: Expr,
 }
+
+// An 'else if' is represented as a single Statement_If nested in else_body;
+// only the outermost if in a chain owns the closing 'end'. else_body is nil
+// when there is no 'else' clause.
+Statement_If :: struct {
+	pos:       int, // pos of 'if'
+	cond:      Expr,
+	then_body: []Statement,
+	else_body: []Statement,
+}
+
+
+// Expressions
+
 Expr :: union {
 	^Expression_IntLiteral,
 	^Expression_BinaryOp,

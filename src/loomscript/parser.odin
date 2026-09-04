@@ -1,6 +1,7 @@
 package loomscript
 
 import "core:mem"
+import "core:fmt"
 
 Parse_Error :: struct {
 	msg: string,
@@ -124,10 +125,12 @@ push_error :: proc(p: ^Parser, msg: string, pos: int) {
 @(private)
 binary_precedence :: proc(kind: Token_Kind) -> (prec: int, ok: bool) {
 	#partial switch kind {
-	case .Plus, .Minus:
+	case .EqEq, .NotEq, .Lt, .LtEq, .Gt, .GtEq:
 		return 1, true
-	case .Star:
+	case .Plus, .Minus:
 		return 2, true
+	case .Mult:
+		return 3, true
 	case:
 		return 0, false
 	}
@@ -227,6 +230,9 @@ parse_statement :: proc(p: ^Parser) -> Statement {
 	case .Let:
 		return parse_let_Statement(p)
 
+	case .If:
+		return parse_if_statement(p)
+
 	case .Identifier:
 		if peek_at(p, 1).kind == .Assign {
 			return parse_assign_Statement(p)
@@ -275,6 +281,96 @@ parse_assign_Statement :: proc(p: ^Parser) -> Statement {
 	node := new(Statement_Assignment, p.allocator)
 	node^ = Statement_Assignment{pos = name_tok.pos, name = name_tok.text, value = value}
 	return node
+}
+
+// if_Statement := 'if' expr Newline block ('else' 'if' expr Newline block)* ('else' Newline block)? 'end'
+// Only the outermost call consumes the closing 'end' — parse_if_head builds
+// an 'else if' chain as nested Statement_If values in else_body and returns
+// without touching 'end', so the whole chain closes on one 'end' token.
+@(private)
+parse_if_statement :: proc(p: ^Parser) -> Statement {
+	node := parse_if_head(p)
+
+	if peek(p).kind == .End {
+		advance(p)
+	} else {
+		push_error(p, "expected 'end' to close 'if'", peek(p).pos)
+	}
+
+	return node
+}
+
+@(private)
+parse_if_head :: proc(p: ^Parser) -> ^Statement_If {
+	if_tok := advance(p) // 'if'
+
+	cond := parse_binary_op(p, 0)
+
+	if peek(p).kind == .Newline {
+		skip_newlines(p)
+	} else {
+		push_error(p, "expected newline after 'if' condition", peek(p).pos)
+	}
+
+	node := new(Statement_If, p.allocator)
+	node^ = Statement_If{pos = if_tok.pos, cond = cond, then_body = parse_block(p)}
+
+	if peek(p).kind == .Else {
+		advance(p) // 'else'
+		if peek(p).kind == .If {
+			nested := parse_if_head(p)
+			// composite-literal slices default to context.allocator, not
+			// p.allocator (the caller's arena) — build it with make() so the
+			// single-element else_body outlives this call the same way
+			// then_body/parse_block's slices already do.
+			else_body := make([]Statement, 1, p.allocator)
+			else_body[0] = nested
+			node.else_body = else_body
+		} else {
+			skip_newlines(p)
+			node.else_body = parse_block(p)
+		}
+	}
+
+	return node
+}
+
+// parse_block parses newline-separated statements until it sees 'else',
+// 'end', or EOF, without consuming that terminator.
+@(private)
+parse_block :: proc(p: ^Parser) -> []Statement {
+	statements := make([dynamic]Statement, p.allocator)
+
+	skip_newlines(p)
+	for {
+		tok := peek(p)
+		if tok.kind == .Else || tok.kind == .End || tok.kind == .EOF {
+			break
+		}
+
+		errors_before := len(p.errors)
+		stmt := parse_statement(p)
+		if stmt != nil {
+			append(&statements, stmt)
+		}
+
+		tok = peek(p)
+		if tok.kind == .Else || tok.kind == .End || tok.kind == .EOF {
+			break
+		}
+
+		if tok.kind != .Newline {
+			if len(p.errors) == errors_before {
+				push_error(p, "expected newline after statement", tok.pos)
+			}
+			for peek(p).kind != .Newline && peek(p).kind != .Else && peek(p).kind != .End && peek(p).kind != .EOF {
+				advance(p)
+			}
+		}
+		skip_newlines(p)
+	}
+
+	return statements[:]
 }
 
 // Expression_Statement := expr

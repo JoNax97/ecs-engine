@@ -27,20 +27,36 @@ write_statement :: proc(b: ^strings.Builder, stmt: Statement, depth: int) {
 	}
 
 	switch node in stmt {
-	case ^Statement_Declaration:
-		fmt.sbprintfln(b, "Let %s (pos=%d)", node.name, node.pos)
-		write_expr(b, node.value, depth + 1)
+		case ^Statement_Declaration:
+			fmt.sbprintfln(b, "Let %s (pos=%d)", node.name, node.pos)
+			write_expr(b, node.value, depth + 1)
 
-	case ^Statement_Assignment:
-		fmt.sbprintfln(b, "Assign %s (pos=%d)", node.name, node.pos)
-		write_expr(b, node.value, depth + 1)
+		case ^Statement_Assignment:
+			fmt.sbprintfln(b, "Assign %s (pos=%d)", node.name, node.pos)
+			write_expr(b, node.value, depth + 1)
 
-	case ^Statement_Expression:
-		fmt.sbprintfln(b, "Expression_Statement (pos=%d)", node.pos)
-		write_expr(b, node.expr, depth + 1)
+		case ^Statement_Expression:
+			fmt.sbprintfln(b, "Expression (pos=%d)", node.pos)
+			write_expr(b, node.expr, depth + 1)
 
-	case nil:
-		fmt.sbprintfln(b, "<nil>")
+		case ^Statement_If:
+			fmt.sbprintfln(b, "If (pos=%d)", node.pos)
+			write_expr(b, node.cond, depth + 1)
+			for s in node.then_body {
+				write_statement(b, s, depth + 1)
+			}
+			if node.else_body != nil {
+				for _ in 0 ..< depth {
+					strings.write_string(b, "  ")
+				}
+				fmt.sbprintfln(b, "Else")
+				for s in node.else_body {
+					write_statement(b, s, depth + 1)
+				}
+			}
+
+		case nil:
+			fmt.sbprintfln(b, "<nil>")
 	}
 }
 
@@ -52,7 +68,7 @@ write_expr :: proc(b: ^strings.Builder, expr: Expr, depth: int) {
 
 	switch node in expr {
 	case ^Expression_IntLiteral:
-		fmt.sbprintfln(b, "Int_Lit %d (pos=%d)", node.value, node.pos)
+		fmt.sbprintfln(b, "IntLiteral %d (pos=%d)", node.value, node.pos)
 
 	case ^Expression_BinaryOp:
 		fmt.sbprintfln(b, "Binary %v (pos=%d)", node.op, node.pos)
@@ -64,7 +80,7 @@ write_expr :: proc(b: ^strings.Builder, expr: Expr, depth: int) {
 		write_expr(b, node.operand, depth + 1)
 
 	case ^Expression_Identifier:
-		fmt.sbprintfln(b, "Ident %s (pos=%d)", node.name, node.pos)
+		fmt.sbprintfln(b, "Identifier %s (pos=%d)", node.name, node.pos)
 
 	case nil:
 		fmt.sbprintfln(b, "<nil>")
