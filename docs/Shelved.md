@@ -24,6 +24,12 @@ Not adopted: partition decides which peers a shard applies to, so a shard spanni
 
 Revisit if partition stops being a synchronization input and becomes only a query scope.
 
+### Rollback determinism instead of state synchronization
+
+Peers exchange inputs rather than state, each simulating identically and rolling back on misprediction. Wire cost would be independent of world size.
+
+Not adopted: it needs either shard isolation, or that every peer simulates everything, foreclosing the streaming, partial loading and interest management [layout is meant to serve](Design%20Principles.md#data-layout-follows-declared-intent).
+
 ---
 
 ## Data Modeling and Declaration Syntax

@@ -65,6 +65,14 @@ Agent-managed rationale index. Not spec, not for a human reader. Holds what the 
 ### Frame model premise
 `Engine Core.md#frame-model-and-synchronization`
 - load-bearing for: flat-copyable rule, `non_serialized`, bit packing, `Design Principles.md#transparent-networking-and-serialization`. stated bare in the doc; this is what falls over without it
+- state sync over rollback `Shelved.md#rollback-determinism-instead-of-state-synchronization` <- relationships link arbitrary entities at runtime, so causal isolation has no static proof and rollback degenerates to simulating everything
+
+### Structural changes take effect at the frame boundary
+`Engine Core.md#frame-model-and-synchronization`
+- -> presence bitmaps immutable during frame execution, so a query binding resolves once and stays valid
+- -> no target resolved during a frame can be dead, destruction being structural
+- -> structural mutation batches into one shard-ordered pass, not random access at statement sites
+- -> a length change is structural, so an `external` field cannot grow mid-frame `Pending.md#layout-of-nested-external-data`
 
 ---
 

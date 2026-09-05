@@ -63,4 +63,6 @@ Every doc in `docs/` states settled decisions only. Four destinations, applied o
 
 - When asked for a final check, a proofread, a review before submitting, etc, run `python3 scripts/lint-links.py` **first**, and report its result before any other finding. It checks for invalid and stale links. Exit status is 1 if anything is wrong.
 
+- We're making a conscious effort to keep the internal documents (ie, everything except specs and implementations) concise to avoid token churn. Review your changes to pending, shelved and internal to minimize wordiness, unimportant information, etc
+
 - When modifying code in `/src`, run `/scripts/build.sh` to automatically check, test and build the code. As the codebase grows, you should improve and expand this build script instead of running ad-hoc commands.

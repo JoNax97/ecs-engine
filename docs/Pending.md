@@ -31,12 +31,32 @@ One question: a shard holds a bounded number of [placement classes](Engine%20Cor
 - A page holds one class, so classes above pages-per-shard fragment shards. That is the budget, not the class field's width.
 - What a thinly populated `component ✕ owner ✕ partition` triple wastes, given it still costs a whole shard.
 
+### Presence encoding beyond a plain bitmap
+status: idea · importance: 2
+
+Variable Encoding picked per shard — bitmap, run-length, sorted slot array — interchangeable since all yield sorted slot streams, which merge.
+
+- Only pays off if populations are sparse, which depends on [target representation](#relationship-target-representation): pairs are what makes them so.
+- Variable-length encoding makes a shard variable-size, costing fixed offsets and cheap sub-range copies.
+- An encoding switch rewrites a whole range, so a one-entity change can produce a full-range delta.
+
 ### Entity identity and generation
 status: pending · importance: 4
 
 Unspecified: ID composition, whether there is a generation counter, what a stale ID resolves to. [Identity is stable across migration](Engine%20Core.md#entity-identity), so it encodes no partition attribute.
 
-Encoding must be canonical — no spare bits, no two patterns naming one entity — since [handles compare whole](Language%20Spec.md#comparison-semantics).
+No *free* bits: every bit is identity or is masked out of comparison, since [handles compare whole](Language%20Spec.md#comparison-semantics). Metadata may occupy the rest if it never varies for the entity and is globally agreed — blind copy carries it verbatim, with no fixup.
+
+A generation counter cannot wrap: a wrapped stale handle matches the current generation, so the liveness check cannot see it. Retirement instead, cost unquantified.
+
+### What a stored reference holds
+status: pending · importance: 4
+
+What a reference physically carries, given [identity resolves to a slot through a mapping](Engine%20Core.md#entity-identity).
+
+- Bare identity pays the lookup on every traversal, and relationship traversal is the hot path.
+- Identity plus a slot hint, checked against a version and repaired on miss: nothing to do at migration time, stale hints heal lazily, costs width per reference.
+- Whether the mapping can stay an array. A sparse identity space makes it a hash, which is [general indexing](Design%20Principles.md#no-general-indexing-or-materialization), and that constrains identity allocation.
 
 ### What a stored reference holds
 status: pending · importance: 4
@@ -68,7 +88,7 @@ Open:
 - What a copy into storage costs. Deep copy plus reference fixup, proportional to nested content; the references themselves come from walking the [flattened layout](Engine%20Core.md#component-flattening).
 - What growth costs. [Offsets are shard-relative](Engine%20Core.md#component-shards), so a length change allocates inside the shard, not globally.
 
-Stated objective (Joaquin, 2026-09-01): make [the synchronization path](#storage-and-memory-layout) treat an `external` field as cheaply as an inline one, at which point the [placement annotation](Language%20Spec.md#storage) has no consequence left to announce and can be dropped. Reads and copies can plausibly reach chunk-cost; growth cannot, since a length change is a structural change, so the surviving distinction may be fixed-size against resizable rather than inline against external.
+Stated objective: make [the synchronization path](#storage-and-memory-layout) treat an `external` field as cheaply as an inline one, at which point the [placement annotation](Language%20Spec.md#storage) has no consequence left to announce and can be dropped. Reads and copies can plausibly reach chunk-cost; growth cannot, since a length change is a structural change, so the surviving distinction may be fixed-size against resizable rather than inline against external.
 
 ### Flattened component layout
 status: mechanism · importance: 3
@@ -569,6 +589,29 @@ Either way binding order becomes semantic and the compiler loses join-reordering
 ---
 
 ## Relationships
+
+### Relationship target representation
+status: pending · importance: 4
+
+Target held as payload on the source, or encoded into the component id as a pair (`relationship ✕ target`) whose presence is a bit.
+
+- Single-target favours payload: a few bytes, forward traversal is a field read.
+- Multi-target favours pairs: several targets are several bits, where payload needs a per-source list and so [auxiliary allocation](#layout-of-nested-external-data).
+- Pairs must be shard-local — a world-spanning registry is not [blind-copyable](Engine%20Core.md#constraints).
+- Reverse lookup decides nothing: shard-local pairs lose it too, so it is derived either way.
+- Pair cost tracks target sharing within a shard; distinct targets do not collapse.
+
+### Destruction cascade on mutual and counted relationships
+status: pending · importance: 4
+
+A destroyed entity leaves references behind. Two cases cannot tolerate it:
+
+- Mutual guarantees [both sides aware of each other](Language%20Spec.md#relationships), so a dead target leaves a dangling half-edge — a broken guarantee, not a stale value.
+- [Counters answer `count` with no scan](Language%20Implementation.md#reductions); uncascaded they count dead targets.
+
+Backlinks exist only for mutual consistency, so counted-but-not-mutual owes an authoritative counter with no cheap cascade path. One gives: counted implies mutual, counters are recomputed, or backlinks extend to counted.
+
+Unidirectional uncounted may skip cascade and detect a dead target on read.
 
 ### Payload storage on symmetric relationships
 status: pending · importance: 3
