@@ -63,11 +63,8 @@ Everything reachable inside a component must survive being copied verbatim to an
 ## Frame Model and Synchronization
 
 State is synchronized between peers as per-frame shard copies. A peer either owns entities or receives them.
-<<<<<<< HEAD
-=======
 
 Structural changes — component addition and removal, entity creation and destruction — take effect at the frame boundary, not at the point of the statement requesting them.
->>>>>>> b263ad3 (Initial ecs storage design)
 
 ---
 
@@ -75,4 +72,3 @@ Structural changes — component addition and removal, entity creation and destr
 
 - **Access sets are inferred, never declared.** The compiler statically extracts per-field read/write sets from imperative bodies.
 - **A system is an organization and scheduling construct, not a behaviour container.** A zero-argument block the engine instantiates and script never constructs.
-
