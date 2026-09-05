@@ -5,6 +5,7 @@ Agent-managed rationale index. Not spec, not for a human reader. Holds what the 
 - One entry per decision, under the doc that states it; Language Spec subdivides by that doc's own sections. Citations sit on the line under the heading.
 - `<- X` = rests on X. `-> Y` = Y breaks if reversed. Other bullets free-form.
 - Citations name the file (`Language Spec.md#storage`); an unqualified anchor means an entry heading here. `scripts/lint-links.py` checks both.
+- No dates and no attributions. An entry records what a decision rests on, not when or by whom it was made.
 - Query with `python3 scripts/clause.py <pattern>` (matches heading, citation, or body); never read this file end to end. Update the matched entry in the same pass as the doc change.
 
 ---
@@ -13,16 +14,43 @@ Agent-managed rationale index. Not spec, not for a human reader. Holds what the 
 
 ### Flat-copyable rule
 `Engine Core.md#the-flat-copyable-rule`
-- <- frame model: sync copies blocks as opaque bytes, so anything reachable in a component must survive verbatim copy to another address space
+- <- frame model: sync copies shards as opaque bytes, so anything reachable in a component must survive verbatim copy to another address space
 - -> enum size fixed at declaration, hence largest-variant+discriminant payload `Language Implementation.md#enum-payloads`
 - shares propagation machinery with `Language Implementation.md#load-time-constant-taint` + `Language Implementation.md#storability-taint` — change one, check the others
 
 ### Storage constraints
 `Engine Core.md#constraints`
 - blind-copyability <- what the memory-tier split exists to protect
-- handle stability -> rules out archetype storage as stated; bitmap satisfies it structurally. live tiebreaker between the two
-- partition by ownership/serializability <- block cannot be blind-copied one direction if ownership varies inside. same mechanism expected to cover streaming, partial loads, interest management
+- handle stability -> ruled out archetype storage, settled the model `Shelved.md#archetypetable-storage`
+- shard membership by ownership/partition/serializability <- shard cannot be blind-copied one direction if ownership varies inside. partition added once sync applicability was seen to be the same kind of constraint `#shard-key-is-component-x-owner-x-partition`
 - static addressability <- assumed by access-set extraction and `where` predicates; both take a field as offset+width at any depth
+
+### Inverted bitmap storage
+`Engine Core.md#storage-model`
+- two sufficient arguments: handle stability, and key dimensionality — a table row carries all components, so serializability needs a third axis that per-type storage dissolves
+- -> memory tracks slot-space clustering, not component-set combinatorics. badly clustered worlds cost real memory, which `#inferred-placement-class` exists to prevent
+- not re-litigable on evidence: Massive shipped v19 on sparse sets and replaced them with this model in v20
+
+### Stable identity across migration
+`Engine Core.md#entity-identity`
+- <- relationships are grammar with maintained backlinks `Language Implementation.md#reductions`, so slot-as-identity would break every edge on migration and need a fixup pass
+- <- crossing frequency is unpredictable for a general engine. flat tax beats the cliff: slot-as-identity makes frequent migration inexpressible except as destroy/recreate
+- -> cost lands only on stored-reference traversal, never on queries, which yield slots `Pending.md#what-a-stored-reference-holds`. smaller than it looks — staleness validation already costs a dependent load chain that the mapping subsumes
+
+### Shard key is component x owner x partition
+`Engine Core.md#component-shards`
+- <- the three sync inputs differ in shape. ownership sets direction, partition sets applicability, serializability forbids sync outright; the first two are per-entity and dynamic, the third per component type and static
+- -> serializability needs no axis: component id is already in the key, so `non_serialized` occupies its own shards by construction
+- -> auxiliary data has a shard to be relative to, settling what an `external` offset is based on `Pending.md#layout-of-nested-external-data`
+- partition has no engine-assigned meaning but is not semantics-free: it is in the sync path, so it cannot be demoted to a filter `Shelved.md#partition-as-a-mask-plane`
+- naming: `block` was already code blocks `Language Spec.md#basic-syntax` plus a component's own layout, and `chunk` was a stray fourth name for this. "partition" over "cluster" anticipates spatial features mounting on it — watch the collision with "spatial partition" as an acceleration structure `Language Implementation.md#value-predicates`
+
+### Inferred placement class
+`Engine Core.md#component-shards`
+- = archetype inference as a hint, not a structure. mispredictions cost density only; nothing relocates
+- -> must stay unobservable, or changing the inference changes program meaning. no query filter, no count-by, no reflection
+- -> self-healing without policy: a page re-keys once it drains empty, so bad predictions do not accumulate
+- partition stays author-assigned by contrast <- it has sync consequences an inference cannot see
 
 ### Component flattening
 `Engine Core.md#component-flattening`
@@ -266,7 +294,7 @@ Agent-managed rationale index. Not spec, not for a human reader. Holds what the 
 
 #### File state is non-persistent
 `Engine Core.md#memory-tiers`
-- <- Unmanaged memory sits outside every memory block and the frame model synchronizes blocks. non-sync and non-serialization are consequences of the tier, not separate rules
+- <- Unmanaged memory sits outside every shard and the frame model synchronizes shards. non-sync and non-serialization are consequences of the tier, not separate rules
 - carried by scope rather than a keyword <- failure modes correlate with misuse: a genuine cache is rebuildable so reload wiping it is invisible, while secretly authoritative state breaks loudly on first reload. same split as Bevy `Resource`/`Local`, flecs world singleton/`ctx`
 - -> when systems become first-class, variables stay module-level. a system is not addressable, so `System.variable` would make it addressable through the back door
 
@@ -285,7 +313,7 @@ Agent-managed rationale index. Not spec, not for a human reader. Holds what the 
 - a variable's value *is* the handle so it repoints; a field names storage so it writes contents. the asymmetry comes from what a field is, not from a case carved out for arrays
 - rejected declaration-binds/assignment-always-stores (C++ reference semantics): collapses the variable/binding distinction for handle types, and C++/C# make it opt-in at the declaration (`&`, `ref`) where Loom has no marker
 - -> field assignment stores for inline and `external` fields alike. an `external` field does hold a reference and could be repointed, but that would make placement change semantics, which `#collections-are-handles-strings-are-values` forbids. the two brace each other
-- -> **an author can never produce a stored reference**: handles repoint only on the stack, and inside stored data the reference is the runtime's with only contents changing. this is what makes handles inside components workable — every block-relative offset is runtime-made, so flat-copyability rests on an invariant rather than a prohibition, and the static-discriminant blocker in `Pending.md#layout-of-nested-external-data` is answered on the correctness side
+- -> **an author can never produce a stored reference**: handles repoint only on the stack, and inside stored data the reference is the runtime's with only contents changing. this is what makes handles inside components workable — every shard-relative offset is runtime-made, so flat-copyability rests on an invariant rather than a prohibition, and the static-discriminant blocker in `Pending.md#layout-of-nested-external-data` is answered on the correctness side
 - accepted: no O(1) handoff into storage. not a cost of these semantics — flat-copyability needs data at specific addresses, so inbound data is copied regardless. eliding the copy for build-then-store is implementation freedom (no closures, linear execution, static access sets); the contract must only avoid promising the built buffer stays a distinct buffer
 - absence: an `external` field always designates a runtime-owned buffer. if absence is ever needed it is a sentinel handle state, not a null, and belongs to resource-like handles — plain collections must not inherit a presence check `Pending.md#memory-tiers-handle-validity-and-nullabsence-semantics`
 

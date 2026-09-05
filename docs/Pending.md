@@ -21,32 +21,39 @@ Each entry carries these on the line directly below its heading, as `status: …
 
 ## Storage and Memory Layout
 
-### Storage model
-status: contradiction · importance: 5
+### Shard granularity and placement keying
+status: pending · importance: 4
 
-Undecided, needs its own design pass. Constraints in [Engine Core](Engine%20Core.md#constraints). Two candidates:
+One question: a shard holds a bounded number of [placement classes](Engine%20Core.md#component-shards), so key cardinality and shard size trade against each other.
 
-- *Archetype/table.* Grouped by component set, contiguous. Structural changes move the entity and invalidate handles; deferring removal does not fix it, since adds relocate too. Fails handle stability as stated.
-- *Inverted hierarchical bitmap.* A bitmap per component over entity slots; entities never move, so handle stability holds structurally. Empty blocks don't materialize, so memory cost tracks entity-ID clustering, not architecture.
-
-Root blocker for the rest of this section, for `changed` on a non-owning peer, and for handle validity — whether an unrelated entity's mutation can invalidate a handle is a property of the model, not the handle. The ownership entry below presumes archetype partitioning it has not earned.
-
-Held here, not examinable before the model is chosen:
-
-- *Copy granularity.* Unit of transfer between peers: memory block, sub-range, or single component.
-- *Storage for pointer-like component data.* The ECS-managed buffers an `external` field selects. Their semantics are settled — see [Collections](Language%20Spec.md#collections) and [Storage](Language%20Spec.md#storage) — but their layout is not.
+- Slots per shard, and per allocation page within it.
+- What the compiler keys a class on. Exact component set reintroduces archetype explosion as class count; construction site or spawn template is bounded by program text instead.
+- A page holds one class, so classes above pages-per-shard fragment shards. That is the budget, not the class field's width.
+- What a thinly populated `component ✕ owner ✕ partition` triple wastes, given it still costs a whole shard.
 
 ### Entity identity and generation
 status: pending · importance: 4
 
-Unspecified: ID composition, whether there is a generation counter, what a stale ID resolves to. Blocked on the storage model.
+Unspecified: ID composition, whether there is a generation counter, what a stale ID resolves to. [Identity is stable across migration](Engine%20Core.md#entity-identity), so it encodes no partition attribute.
 
 Encoding must be canonical — no spare bits, no two patterns naming one entity — since [handles compare whole](Language%20Spec.md#comparison-semantics).
+
+### What a stored reference holds
+status: pending · importance: 4
+
+What a reference physically carries, given [identity resolves to a slot through a mapping](Engine%20Core.md#entity-identity).
+
+- Bare identity pays the lookup on every traversal, and relationship traversal is the hot path.
+- Identity plus a slot hint, checked against a version and repaired on miss: nothing to do at migration time, stale hints heal lazily, costs width per reference.
+- Whether the mapping can stay an array. A sparse identity space makes it a hash, which is [general indexing](Design%20Principles.md#no-general-indexing-or-materialization), and that constrains identity allocation.
 
 ### The synchronization path
 status: pending · importance: 3
 
-Memory block selection, delta compression, peer topology — all unwritten. [Frame Model](Engine%20Core.md#frame-model-and-synchronization) records only the premise: per-frame chunk copies, a peer either owning or receiving. `non_serialized`, bit packing and the flat-copyable rule are all written against it.
+Shard selection, delta compression, peer topology — all unwritten. [Frame Model](Engine%20Core.md#frame-model-and-synchronization) records only the premise: per-frame shard copies, a peer either owning or receiving. `non_serialized`, bit packing and the flat-copyable rule are all written against it.
+
+- Copy granularity: whole shard, sub-range, or single component.
+- Whether deltas earn their complexity, given a full shard copy touches only allocated pages and so already scales with live data, not slot-space capacity.
 
 ### Layout of nested external data
 status: pending · importance: 4
@@ -57,9 +64,9 @@ The correctness case is closed. [An author cannot install a handle into stored d
 
 Open:
 
-- One pointer representation, or two? A block-relative offset survives blind copying and a general pointer does not, so a `value` on the stack and the same `value` in storage may need different layouts at the same size.
+- One pointer representation, or two? A shard-relative offset survives blind copying and a general pointer does not, so a `value` on the stack and the same `value` in storage may need different layouts at the same size.
 - What a copy into storage costs. Deep copy plus reference fixup, proportional to nested content; the references themselves come from walking the [flattened layout](Engine%20Core.md#component-flattening).
-- "Block-relative" presumes archetype storage; under inverted bitmaps there may be no block to be relative to. Blocked on the [storage model](#storage-and-memory-layout).
+- What growth costs. [Offsets are shard-relative](Engine%20Core.md#component-shards), so a length change allocates inside the shard, not globally.
 
 Stated objective (Joaquin, 2026-09-01): make [the synchronization path](#storage-and-memory-layout) treat an `external` field as cheaply as an inline one, at which point the [placement annotation](Language%20Spec.md#storage) has no consequence left to announce and can be dropped. Reads and copies can plausibly reach chunk-cost; growth cannot, since a length change is a structural change, so the surviving distinction may be fixed-size against resizable rather than inline against external.
 
@@ -98,7 +105,7 @@ Depends on the host embedding API, unwritten.
 ### Ownership and `non_serialized` have layout consequences
 status: pending · importance: 4
 
-Both partition storage: a block cannot be blind-copied one direction if ownership varies within it, and non-serialized data cannot share a block with synced data. Same mechanism expected to cover streaming, partial loads and interest management.
+Serializability is already handled: component id is in the [shard key](Engine%20Core.md#component-shards), so `non_serialized` occupies its own shards by construction.
 
 Open: how ownership is expressed. Structurally (tag or relationship, not a field) would let partitioning segregate owned from remote automatically and keep it a free presence check in `with`.
 

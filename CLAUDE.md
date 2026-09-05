@@ -2,7 +2,7 @@
 
 Loom is an ECS engine and runtime. LoomScript is its scripting language, conceived as genuinely domain-native in the way SQL is native to relational databases: ECS primitives — entities, components, systems, queries, relationships — are the grammar itself, not an API layer over a general-purpose language.
 
-Nothing is implemented; active work is iterative spec-writing. Solo project — no README, onboarding docs, or collaboration scaffolding are wanted.
+Implementation is early and follows the spec, which stays ahead of it: `src/loomscript` has a lexer, parser and AST in Odin, and the engine core is unstarted. Most work is still iterative spec-writing. Solo project — no README, onboarding docs, or collaboration scaffolding are wanted.
 
 ## Documents
 

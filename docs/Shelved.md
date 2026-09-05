@@ -6,6 +6,26 @@ Each entry records what was proposed, why it was rejected, and what would have t
 
 ---
 
+## Storage and Memory Layout
+
+### Archetype/table storage
+
+Entities grouped by component set, each set contiguous. Not adopted: a structural change relocates the entity — deferring removal does not help, since adds relocate too — which fails [handle stability](Engine%20Core.md#constraints) directly.
+
+Independently, a table row carries every component, so non-serialized data shares a row with synced data and serializability becomes a third partitioning axis. Per-component-type storage dissolves that axis rather than splitting tables along it.
+
+Revisit only if handle stability stops being required.
+
+### Partition as a mask plane
+
+Partition as a bitmask rather than as a property of the shard, so an entity could change partition by flipping two bits and never move.
+
+Not adopted: partition decides which peers a shard applies to, so a shard spanning partitions cannot be sent as one unit — applicability degrades to a per-entity decision at sync time, which is what [blind-copyability](Engine%20Core.md#constraints) exists to prevent. The mobility it was meant to buy comes instead from [identity being stable across migration](Engine%20Core.md#entity-identity).
+
+Revisit if partition stops being a synchronization input and becomes only a query scope.
+
+---
+
 ## Data Modeling and Declaration Syntax
 
 ### Dot-sugar on the first parameter
